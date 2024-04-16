@@ -1,0 +1,3 @@
+[submodule "tpch-kit"]
+	path = tpch-kit
+	url = git@github.com:sylph520/tpch-kit.git

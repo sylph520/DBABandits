@@ -2,10 +2,11 @@ import logging
 import os
 
 # ===============================  Program Related  ===============================
-DB_CONFIG = '\config\db.conf'
-EXPERIMENT_FOLDER = '\experiments'
-WORKLOADS_FOLDER = '\\resources\\workloads'
-EXPERIMENT_CONFIG = '\config\exp.conf'
+DB_CONFIG = '/config/db.conf'
+EXPERIMENT_FOLDER = '/experiments'
+WORKLOADS_FOLDER = '/resources/workloads'
+# EXPERIMENT_CONFIG = '\config\exp.conf'
+EXPERIMENT_CONFIG = '/config/exp.conf'
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGGING_LEVEL = logging.INFO
 
