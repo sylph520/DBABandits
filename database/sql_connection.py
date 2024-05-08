@@ -17,10 +17,12 @@ def get_sql_connection():
     db_type = db_config['SYSTEM']['db_type']
     server = db_config[db_type]['server']
     database = db_config[db_type]['database']
-    driver = db_config[db_type]['driver']
-
-    return pyodbc.connect(
-        r'Driver=' + driver + ';Server=' + server + ';Database=' + database + ';Trusted_Connection=yes;')
+    # driver = db_config[db_type]['driver']
+    driver = 'ODBC Driver 18 for SQL Server'
+    # TODO: make the user and PWD also configurable in the conf file
+    dsn = f'DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={server};DATABASE={database};UID=sa;PWD=Sql123456;'
+    dsn += 'TrustServerCertificate=Yes;'
+    return pyodbc.connect(dsn)
 
 
 def close_sql_connection(connection):
