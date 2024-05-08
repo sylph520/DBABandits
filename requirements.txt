@@ -1,10 +1,10 @@
-pytest
-numpy
+keras==2.6.0
+tensorflow==2.6.0
 matplotlib
 pandas
 seaborn
-keras
-tensorflow
+pytest
+numpy
 pyodbc
 psycopg2-binary
 # There are several python SQL drivers available. However, Microsoft places its testing efforts and its confidence in pyodbc driver.

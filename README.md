@@ -9,6 +9,7 @@ We propose a self-driving approach to online index selection that eschews the DB
     2. You need to generate queries for you benchmark
     3. You need to create a workload file for your benchmark (example workload files can be found in `resources/workloads` folder)
     4. Notice that we have included the predicates and payload of those queries in the workload file
+		- each query is included a json file with entries like {"id": 1, "query_string": "xxx", "predicates": {LINEITEM": {"L_SHIPDATE": "r"}}, "paylod": {}, "group_by": {}, "order_by": {}}
     5. Add DB connection details to `config/db.conf`
 2. Setting up your experiment. Our framework allows you easily setup experiments in `config/exp.conf`
     1. See the examples in `config/exp.conf`
