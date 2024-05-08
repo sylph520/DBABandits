@@ -1,4 +1,5 @@
 import itertools
+from typing import Dict
 
 import numpy
 
@@ -18,7 +19,7 @@ def gen_arms_from_predicates_v2(connection, query_obj):
     :param query_obj: Query object
     :return: list of bandit arms
     """
-    bandit_arms = {}
+    bandit_arms: Dict[id, BanditArm] = {}
     predicates = query_obj.predicates
     payloads = query_obj.payload
     query_id = query_obj.id
@@ -297,6 +298,7 @@ def get_derived_value_context_vectors_v3(connection, bandit_arm_dict, query_obj_
 def get_query_context_v1(query_object, all_columns, context_size):
     """
     Return the context vectors for a given query.
+    each entry is 1 if the column in indexable otherwise 0
 
     :param query_object: query object
     :param all_columns: columns in database

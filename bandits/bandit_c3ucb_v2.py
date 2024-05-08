@@ -50,9 +50,9 @@ class C3UCB(C3UCBBaseBandit):
         # find the upper bound for every arm
         for i in range(len(self.arms)):
             creation_cost = weight_vector[1] * self.context_vectors[i][1]
-            average_reward = numpy.asscalar(weight_vector.transpose() @ self.context_vectors[i]) - creation_cost
+            average_reward = (weight_vector.transpose() @ self.context_vectors[i]).item() - creation_cost
             temp_upper_bound = average_reward + self.hyper_alpha * numpy.sqrt(
-                numpy.asscalar(self.context_vectors[i].transpose() @ v_inverse @ self.context_vectors[i]))
+                (self.context_vectors[i].transpose() @ v_inverse @ self.context_vectors[i]).item())
             temp_upper_bound = temp_upper_bound + (creation_cost/constants.CREATION_COST_REDUCTION_FACTOR)
             self.upper_bounds.append(temp_upper_bound)
 
@@ -111,7 +111,9 @@ class C3UCB(C3UCBBaseBandit):
     def workload_change_trigger(self, workload_change):
         """
         This forgets history based on the workload change
-
+        if the workload_change > 0.5, hard reset the bandit,
+            i.e., reset the value of v and b to the initial ones
+        else modify the v and b according to the value of workload_change
         :param workload_change: Percentage of new query templates added (0-1) 0: no workload change, 1: 100% shift
         """
         logging.info("Workload change identified " + str(workload_change))
