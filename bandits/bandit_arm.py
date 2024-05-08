@@ -42,7 +42,7 @@ class BanditArm:
         return self.index_name
 
     @staticmethod
-    def get_arm_id(index_cols, table_name, include_cols=()):
+    def get_arm_id(index_cols, table_name, include_cols=()) -> str:
         if include_cols:
             include_col_names = '_'.join(tuple(map(lambda x: x[0:4], include_cols))).lower()
             arm_id = 'IXN_' + table_name + '_' + '_'.join(index_cols).lower() + '_' + include_col_names
