@@ -3,6 +3,7 @@ import logging
 import operator
 import pprint
 from importlib import reload
+from typing import Dict
 
 import numpy
 from pandas import DataFrame
@@ -24,6 +25,10 @@ from bandits.query_v5 import Query
 
 class BaseSimulator:
     def __init__(self):
+        """
+        setup queries (self.queries), db connection (self.connection),
+        and an empty query_object_store
+        """
         # configuring the logger
         logging.basicConfig(
             filename=helper.get_experiment_folder_path(configs.experiment_id) + configs.experiment_id + '.log',
@@ -33,19 +38,21 @@ class BaseSimulator:
         # Get the query List
         self.queries = helper.get_queries_v2()
         self.connection = sql_connection.get_sql_connection()
-        self.query_obj_store = {}
+        self.query_obj_store: Dict[int, Query] = {}
         reload(bandit_helper)
 
 
 class Simulator(BaseSimulator):
-
+    # Simulator inherit from BaseSimulator (init queries and db connections)
     def run(self):
         pp = pprint.PrettyPrinter()
         reload(configs)
+
         results = []
         super_arm_scores = {}
         super_arm_counts = {}
         best_super_arm = set()
+
         logging.info("Logging configs...\n")
         helper.log_configs(logging, configs)
         logging.info("Logging constants...\n")
@@ -66,16 +73,22 @@ class Simulator(BaseSimulator):
         arm_selection_count = {}
         chosen_arms_last_round = {}
         next_workload_shift = 0
+
+        # next_workload_shift act as the workload id
+        # [query_start, query_end] constitude a workload
         queries_start = configs.queries_start_list[next_workload_shift]
         queries_end = configs.queries_end_list[next_workload_shift]
         query_obj_additions = []
+
         total_time = 0.0
 
         for t in range((configs.rounds + configs.hyp_rounds)):
+            # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
             start_time_round = datetime.datetime.now()
-            # At the start of the round we will read the applicable set for the current round. This is a workaround
-            # used to demo the dynamic query flow. We read the queries from the start and move the window each round
+            # At the start of the round we will read the applicable set for the current round.
+            # This is a workaround used to demo the dynamic query flow.
+            # We read the queries from the start and move the window each round
 
             # check if workload shift is required
             if t - configs.hyp_rounds == configs.workload_shifts[next_workload_shift]:
@@ -90,15 +103,16 @@ class Simulator(BaseSimulator):
             # Adding new queries to the query store
             query_obj_list_current = []
             for n in range(len(queries_current_batch)):
-                query = queries_current_batch[n]
+                # for each query, transform and append to the query_obj_store
+                query = queries_current_batch[n]  # a dict of query info
                 query_id = query['id']
                 if query_id in self.query_obj_store:
                     query_obj_in_store = self.query_obj_store[query_id]
                     query_obj_in_store.frequency += 1
-                    query_obj_in_store.last_seen = t
+                    query_obj_in_store.last_seen_round = t
                     query_obj_in_store.query_string = query['query_string']
-                    if query_obj_in_store.first_seen == -1:
-                        query_obj_in_store.first_seen = t
+                    if query_obj_in_store.first_seen_round == -1:
+                        query_obj_in_store.first_seen_round = t
                 else:
                     query = Query(self.connection, query_id, query['query_string'], query['predicates'],
                                   query['payload'], t)
@@ -107,19 +121,21 @@ class Simulator(BaseSimulator):
                 query_obj_list_current.append(self.query_obj_store[query_id])
 
             # This list contains all past queries, we don't include new queries seen for the first time.
-            query_obj_list_past = []
-            query_obj_list_new = []
+            query_obj_list_past, query_obj_list_new = [], []
             for key, obj in self.query_obj_store.items():
-                if t - obj.last_seen <= constants.QUERY_MEMORY and 0 <= obj.first_seen < t:
+                if t - obj.last_seen_round <= constants.QUERY_MEMORY\
+                    and 0 <= obj.first_seen_round < t: # Have seen in previous rounds
                     query_obj_list_past.append(obj)
-                elif t - obj.last_seen > constants.QUERY_MEMORY:
-                    obj.first_seen = -1
-                elif obj.first_seen == t:
+                elif t - obj.last_seen_round > constants.QUERY_MEMORY: # To be forgotten
+                    obj.first_seen_round = -1
+                elif obj.first_seen_round == t:  # new seen in the current round
                     query_obj_list_new.append(obj)
 
-            # We don't want to reset in the first round, if there is new additions or removals we identify a
-            # workload change
-            if t > 0 and len(query_obj_additions) > 0:
+            # We don't want to reset in the first round,
+            # if there is new additions or removals we identify a workload change
+            if t > 0 and len(query_obj_additions) > 0:  # Have seen new query in previous round
+                # the number of queries new seen in round t-1 vs. the number of seen queries in rounds 0-(t-1)
+                # if the former term > the latter term:
                 workload_change = len(query_obj_additions) / len(query_obj_list_past)
                 c3ucb_bandit.workload_change_trigger(workload_change)
 
@@ -128,7 +144,7 @@ class Simulator(BaseSimulator):
 
             # Get the predicates for queries and Generate index arms for each query
             index_arms = {}
-            for i in range(len(query_obj_list_past)):
+            for i in range(len(query_obj_list_past)):  # for each previously seen query
                 bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.connection, query_obj_list_past[i])
                 for key, index_arm in bandit_arms_tmp.items():
                     if key not in index_arms:

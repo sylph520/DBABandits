@@ -16,8 +16,8 @@ import database.sql_helper_v2 as sql_helper
 import shared.configs_v2 as configs
 import shared.helper as helper
 from bandits.experiment_report import ExpReport
-from bandits.oracle_v2 import OracleV6 as Oracle
-from bandits.query_v4 import Query
+from bandits.oracle_v2 import OracleV7 as Oracle
+from bandits.query_v5 import Query
 
 
 # Simulation built on vO to work on dynamic workloads
@@ -146,7 +146,7 @@ class Simulator(BaseSimulator):
             # creating the context, here we pass all the columns in the database
             context_vectors_v1 = bandit_helper.get_name_encode_context_vectors_v2(index_arms, columns,
                                                                                   number_of_columns)
-            context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v2(index_arms, query_obj_list_past,
+            context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(index_arms, query_obj_list_past,
                                                                                     chosen_arms_last_round)
             context_vectors = []
             for i in range(len(context_vectors_v1)):

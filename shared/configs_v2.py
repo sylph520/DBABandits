@@ -12,11 +12,15 @@ experiment_id = exp_config['general']['run_experiment']
 
 # information about experiment
 reps = int(exp_config[experiment_id]['reps'])
-rounds = int(exp_config[experiment_id]['rounds'])
-hyp_rounds = int(exp_config[experiment_id]['hyp_rounds'])
+rounds = int(exp_config[experiment_id]['rounds']) # 25
+hyp_rounds = int(exp_config[experiment_id]['hyp_rounds']) #  0
+# e.g., [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
 workload_shifts = json.loads(exp_config[experiment_id]['workload_shifts'])
+# e.g., [0, 21, 42, 63, 84, 105, 126, 147, 168, 189, 210, 231, 252, 273, 294, 315, 336, 357, 378, 399, 420, 441, 462, 483, 504]
 queries_start_list = json.loads(exp_config[experiment_id]['queries_start'])
+# e.g., [21, 42, 63, 84, 105, 126, 147, 168, 189, 210, 231, 252, 273, 294, 315, 336, 357, 378, 399, 420, 441, 462, 483, 504, 525]
 queries_end_list = json.loads(exp_config[experiment_id]['queries_end'])
+
 config_shifts = json.loads(exp_config[experiment_id]['config_shifts'])
 config_start_list = json.loads(exp_config[experiment_id]['config_start'])
 config_end_list = json.loads(exp_config[experiment_id]['config_end'])

@@ -3,6 +3,7 @@ from importlib import reload
 import logging
 
 from pandas import DataFrame
+import pandas as pd
 
 import constants
 from bandits.experiment_report import ExpReport
@@ -12,6 +13,7 @@ from shared import configs_v2 as configs, helper
 
 # Define Experiment ID list that we need to run
 exp_id_list = ["tpc_h_skew_static_10_MAB3"]
+# exp_id_list = ["tpc_h_static_10_MAB"]  # lsc, uniform static
 
 # Comparing components
 OPTIMAL = constants.COMPONENT_OPTIMAL in configs.components
@@ -66,18 +68,23 @@ for i in range(len(exp_id_list)):
         if MAB:
             Simulators = {}
             for mab_version in configs.mab_versions:
-                Simulators[mab_version] = (getattr(__import__(mab_version, fromlist=['Simulator']), 'Simulator'))
+                Simulators[mab_version] = (
+                    getattr(__import__(mab_version, fromlist=['Simulator']), 'Simulator'))
             for version, Simulator in Simulators.items():
                 version_number = version.split("_v", 1)[1]
                 exp_report_mab = ExpReport(configs.experiment_id,
-                                           constants.COMPONENT_MAB + version_number + exp_id_list[i], configs.reps,
+                                           constants.COMPONENT_MAB + version_number +
+                                           exp_id_list[i], configs.reps,
                                            configs.rounds)
                 for r in range(configs.reps):
                     simulator = Simulator()
                     results, total_workload_time = simulator.run()
                     temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                        constants.DF_COL_MEASURE_VALUE])
-                    temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                    new_row = pd.DataFrame([[-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time]], columns=temp.columns)
+                    temp = pd.concat([temp, new_row])
+                    # temp.append(
+                    #     [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                     temp[constants.DF_COL_REP] = r
                     exp_report_mab.add_data_list(temp)
                 exp_report_list.append(exp_report_mab)
@@ -87,35 +94,43 @@ for i in range(len(exp_id_list)):
             exp_report_no_index = ExpReport(configs.experiment_id, constants.COMPONENT_NO_INDEX + exp_id_list[i], configs.reps,
                                             configs.rounds)
             for r in range(configs.reps):
-                results, total_workload_time = ConfigRunner.run("no_index.sql", uniform=UNIFORM)
+                results, total_workload_time = ConfigRunner.run(
+                    "no_index.sql", uniform=UNIFORM)
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_no_index.add_data_list(temp)
             exp_report_list.append(exp_report_no_index)
 
         # Running Optimal
         if OPTIMAL:
-            exp_report_optimal = ExpReport(configs.experiment_id, constants.COMPONENT_OPTIMAL + exp_id_list[i], configs.reps, configs.rounds)
+            exp_report_optimal = ExpReport(
+                configs.experiment_id, constants.COMPONENT_OPTIMAL + exp_id_list[i], configs.reps, configs.rounds)
             for r in range(configs.reps):
-                results, total_workload_time = ConfigRunner.run("optimal_config.sql", uniform=UNIFORM)
+                results, total_workload_time = ConfigRunner.run(
+                    "optimal_config.sql", uniform=UNIFORM)
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_optimal.add_data_list(temp)
             exp_report_list.append(exp_report_optimal)
 
         # Running DTA Optimal
         if TA_OPTIMAL:
-            exp_report_ta = ExpReport(configs.experiment_id, constants.COMPONENT_TA_OPTIMAL + exp_id_list[i], configs.reps, configs.rounds)
+            exp_report_ta = ExpReport(
+                configs.experiment_id, constants.COMPONENT_TA_OPTIMAL + exp_id_list[i], configs.reps, configs.rounds)
             for r in range(configs.reps):
-                dta_runner = DTARunner(configs.ta_runs, workload_type=constants.TA_WORKLOAD_TYPE_OPTIMAL)
+                dta_runner = DTARunner(
+                    configs.ta_runs, workload_type=constants.TA_WORKLOAD_TYPE_OPTIMAL)
                 results, total_workload_time = dta_runner.run()
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_ta.add_data_list(temp)
             exp_report_list.append(exp_report_ta)
@@ -125,11 +140,13 @@ for i in range(len(exp_id_list)):
             exp_report_ta = ExpReport(configs.experiment_id, constants.COMPONENT_TA_FULL + exp_id_list[i], configs.reps,
                                       configs.rounds)
             for r in range(configs.reps):
-                dta_runner = DTARunner([0], workload_type=constants.TA_WORKLOAD_TYPE_FULL)
+                dta_runner = DTARunner(
+                    [0], workload_type=constants.TA_WORKLOAD_TYPE_FULL)
                 results, total_workload_time = dta_runner.run()
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_ta.add_data_list(temp)
             exp_report_list.append(exp_report_ta)
@@ -139,11 +156,13 @@ for i in range(len(exp_id_list)):
             exp_report_ta = ExpReport(configs.experiment_id, constants.COMPONENT_TA_CURRENT + exp_id_list[i],
                                       configs.reps, configs.rounds)
             for r in range(configs.reps):
-                dta_runner = DTARunner(configs.ta_runs, workload_type=constants.TA_WORKLOAD_TYPE_CURRENT)
+                dta_runner = DTARunner(
+                    configs.ta_runs, workload_type=constants.TA_WORKLOAD_TYPE_CURRENT)
                 results, total_workload_time = dta_runner.run()
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_ta.add_data_list(temp)
             exp_report_list.append(exp_report_ta)
@@ -153,11 +172,13 @@ for i in range(len(exp_id_list)):
             exp_report_ta = ExpReport(configs.experiment_id, constants.COMPONENT_TA_SCHEDULE + exp_id_list[i],
                                       configs.reps, configs.rounds)
             for r in range(configs.reps):
-                dta_runner = DTARunner(configs.ta_runs, workload_type=constants.TA_WORKLOAD_TYPE_SCHEDULE)
+                dta_runner = DTARunner(
+                    configs.ta_runs, workload_type=constants.TA_WORKLOAD_TYPE_SCHEDULE)
                 results, total_workload_time = dta_runner.run()
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_ta.add_data_list(temp)
             exp_report_list.append(exp_report_ta)
@@ -172,7 +193,8 @@ for i in range(len(exp_id_list)):
                 results, total_workload_time = simulator.run()
                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-                temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                temp.append(
+                    [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
                 temp[constants.DF_COL_REP] = r
                 exp_report_mab.add_data_list(temp)
             exp_report_list.append(exp_report_mab)
@@ -182,10 +204,13 @@ for i in range(len(exp_id_list)):
             pickle.dump(exp_report_list, f)
 
         if SEPARATE_EXPERIMENTS:
-            helper.plot_exp_report(configs.experiment_id, exp_report_list, PLOT_MEASURE, PLOT_LOG_Y)
-            helper.create_comparison_tables(configs.experiment_id, exp_report_list)
+            helper.plot_exp_report(configs.experiment_id,
+                                   exp_report_list, PLOT_MEASURE, PLOT_LOG_Y)
+            helper.create_comparison_tables(
+                configs.experiment_id, exp_report_list)
 
 # plot line graphs
 if not SEPARATE_EXPERIMENTS:
-    helper.plot_exp_report(configs.experiment_id, exp_report_list, PLOT_MEASURE, PLOT_LOG_Y)
+    helper.plot_exp_report(configs.experiment_id,
+                           exp_report_list, PLOT_MEASURE, PLOT_LOG_Y)
     helper.create_comparison_tables(configs.experiment_id, exp_report_list)

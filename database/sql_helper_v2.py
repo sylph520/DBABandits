@@ -17,11 +17,13 @@ db_config.read(constants.ROOT_DIR + constants.DB_CONFIG)
 db_type = db_config['SYSTEM']['db_type']
 database = db_config[db_type]['database']
 
-table_scan_times_hyp = copy.deepcopy(constants.TABLE_SCAN_TIMES[database[:-4]])
+benchmark_type = database[:-4] # e.g., tpch_010 -> tpch benchmark with 10 Gb data
+table_scan_times_hyp = copy.deepcopy(constants.TABLE_SCAN_TIMES[benchmark_type])
 table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[database[:-4]])
 
 tables_global = None
 pk_columns_dict = {}
+sel_store = {}
 
 
 def create_index_v1(connection, schema_name, tbl_name, col_names, idx_name, include_cols=()):
@@ -203,10 +205,11 @@ def execute_query_v1(connection, query):
 
 
 def get_table_row_count(connection, schema_name, tbl_name):
-    row_query = f'''SELECT SUM (Rows)
-                        FROM sys.partitions
-                        WHERE index_id IN (0, 1)
-                        And OBJECT_ID = OBJECT_ID('{schema_name}.{tbl_name}');'''
+    # row_query = f'''SELECT SUM (Rows)
+    #                     FROM sys.partitions
+    #                     WHERE index_id IN (0, 1)
+    #                     And OBJECT_ID = OBJECT_ID('{schema_name}.{tbl_name}');'''
+    row_query = f"select count(1) from {tbl_name};"
     cursor = connection.cursor()
     cursor.execute(row_query)
     row_count = cursor.fetchone()[0]
@@ -723,7 +726,7 @@ def get_selectivity_v3(connection, query, predicates):
 
     :param connection: sql connection
     :param query: sql query for which predicates will be identified
-    :param predicates: predicates of that query
+    :param predicates: predicates of that query, a dict of indeable columns
     :return: Predicates list
     """
 
@@ -743,7 +746,8 @@ def get_selectivity_v3(connection, query, predicates):
             read_rows[index_scan[0]] = min(float(index_scan[5]), read_rows[index_scan[0]])
 
         for table in tables:
-            selectivity[table] = read_rows[table]/get_table_row_count(connection, 'dbo', table)
+            table_row_count = get_table_row_count(connection, 'dbo', table)
+            selectivity[table] = read_rows[table]/table_row_count
 
         return selectivity
     else:
