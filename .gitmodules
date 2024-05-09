@@ -1,3 +1,7 @@
 [submodule "tpch-kit"]
 	path = tpch-kit
 	url = git@github.com:sylph520/tpch-kit.git
+[submodule "TPC-H-Skew"]
+	path = TPC-H-Skew
+	url = https://github.com/sylph520/TPC-H-Skew.git
+	branch = mssql
