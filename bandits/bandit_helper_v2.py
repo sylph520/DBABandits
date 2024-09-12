@@ -151,6 +151,7 @@ def gen_arms_from_predicates_single(connection, query_obj):
                 query_obj.selectivity[table_name] > constants.TABLE_MIN_SELECTIVITY and len(includes) > 0):
             continue
         col_permutations = []
+        #TODO: truncates predicates?
         if len(table_predicates) > 6:
             table_predicates = table_predicates[0:6]
         col_permutations = col_permutations + list(itertools.permutations(table_predicates, 1))

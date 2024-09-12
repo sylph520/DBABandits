@@ -3,7 +3,6 @@ import os
 
 # ===============================  Program Related  ===============================
 DB_CONFIG = '/config/db.conf'
-# DB_CONFIG = '/config/tpch_db.conf'
 EXPERIMENT_FOLDER = '/experiments'
 WORKLOADS_FOLDER = '/resources/workloads'
 # EXPERIMENT_CONFIG = '\config\exp.conf'

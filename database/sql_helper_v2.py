@@ -6,6 +6,7 @@ import subprocess
 import time
 from collections import defaultdict
 import copy
+import psycopg2, pyodbc
 
 import constants
 from database.query_plan import QueryPlan

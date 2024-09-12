@@ -5,15 +5,22 @@ import logging
 from pandas import DataFrame
 import pandas as pd
 
-import constants
+import constants  # defining many constant values
 from bandits.experiment_report import ExpReport
 from database.config_test_run import ConfigRunner
 from database.dta_test_run_v2 import DTARunner
 from shared import configs_v2 as configs, helper
 
+import argparse
+argp = argparse.ArgumentParser()
+
+args = argp.parse_args()
+
 # Define Experiment ID list that we need to run
 exp_id_list = ["tpc_h_skew_static_10_MAB3"]
 # exp_id_list = ["tpc_h_static_10_MAB"]  # lsc, uniform static
+if args.exp_id != '':
+    exp_id_list = [args.exp_id]
 
 # Comparing components
 OPTIMAL = constants.COMPONENT_OPTIMAL in configs.components
