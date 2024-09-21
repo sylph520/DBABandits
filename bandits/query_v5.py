@@ -20,10 +20,10 @@ class Query:
         self.frequency = 1
         self.last_seen_round = time_stamp
         self.first_seen_round = time_stamp
-        self.table_scan_times = sql_helper.get_table_scan_times_structure()
-        self.index_scan_times = sql_helper.get_table_scan_times_structure()
-        self.table_scan_times_hyp = sql_helper.get_table_scan_times_structure()
-        self.index_scan_times_hyp = sql_helper.get_table_scan_times_structure()
+        self.table_scan_times = sql_helper.get_table_scan_times_structure(connection)
+        self.index_scan_times = sql_helper.get_table_scan_times_structure(connection)
+        self.table_scan_times_hyp = sql_helper.get_table_scan_times_structure(connection)
+        self.index_scan_times_hyp = sql_helper.get_table_scan_times_structure(connection)
         self.context = None
 
     def __hash__(self):

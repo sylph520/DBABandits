@@ -4,6 +4,7 @@ import operator
 import pprint
 from importlib import reload
 from typing import Dict
+import configparser
 
 import numpy
 from pandas import DataFrame
@@ -22,6 +23,18 @@ from bandits.query_v5 import Query
 
 # Simulation built on vQ to collect the super arm performance
 
+def extract_db_conf() -> dict:
+    db_config = configparser.ConfigParser()
+    db_config.read(constants.ROOT_DIR + constants.DB_CONFIG)
+    db_type = db_config['SYSTEM']['db_type']
+    database = db_config[db_type]['database']
+    server = db_config[db_type]['server']
+    db_conf_dict = {
+        "db_type": db_type,
+        "database": database,
+        "server": server
+    }
+    return db_conf_dict
 
 class BaseSimulator:
     def __init__(self):
@@ -37,7 +50,9 @@ class BaseSimulator:
 
         # Get the query List
         self.queries = helper.get_queries_v2()
-        self.connection = sql_connection.get_sql_connection()
+        db_conf_dict = extract_db_conf()
+        self.db_type = db_conf_dict['db_type']
+        self.connection = sql_connection.get_sql_connection(db_conf_dict)
         self.query_obj_store: Dict[int, Query] = {}
         reload(bandit_helper)
 
@@ -65,7 +80,7 @@ class Simulator(BaseSimulator):
                     1 + constants.CONTEXT_UNIQUENESS + constants.CONTEXT_INCLUDES) + constants.STATIC_CONTEXT_SIZE
 
         # Create oracle and the bandit
-        configs.max_memory -= int(sql_helper.get_current_pds_size(self.connection))
+        configs.max_memory -= int(sql_helper.get_current_pds_size(self.connection, self.db_type))
         oracle = Oracle(configs.max_memory)
         c3ucb_bandit = bandits.C3UCB(context_size, configs.input_alpha, configs.input_lambda, oracle)
 
@@ -145,7 +160,7 @@ class Simulator(BaseSimulator):
             # Get the predicates for queries and Generate index arms for each query
             index_arms = {}
             for i in range(len(query_obj_list_past)):  # for each previously seen query
-                bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.connection, query_obj_list_past[i])
+                bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.connection, query_obj_list_past[i], self.db_type)
                 for key, index_arm in bandit_arms_tmp.items():
                     if key not in index_arms:
                         index_arm.query_ids = set()
@@ -256,7 +271,7 @@ class Simulator(BaseSimulator):
                 sql_helper.bulk_drop_index(self.connection, constants.SCHEMA_NAME, chosen_arms)
 
             end_time_round = datetime.datetime.now()
-            current_config_size = float(sql_helper.get_current_pds_size(self.connection))
+            current_config_size = float(sql_helper.get_current_pds_size(self.connection, self.db_type))
             logging.info("Size taken by the config: " + str(current_config_size) + "MB")
             # Adding information to the results array
             if t >= configs.hyp_rounds:

@@ -13,7 +13,7 @@ from shared import configs_v2 as configs, helper
 
 import argparse
 argp = argparse.ArgumentParser()
-
+argp.add_argument('--exp_id', type=str, default='tpc_h_static_10_MAB')
 args = argp.parse_args()
 
 # Define Experiment ID list that we need to run

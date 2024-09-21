@@ -19,6 +19,7 @@ class DTARunner:
         db_config = configparser.ConfigParser()
         db_config.read(constants.ROOT_DIR + constants.DB_CONFIG)
         db_type = db_config['SYSTEM']['db_type']
+        self.db_type = db_type
         self.server = db_config[db_type]['server']
         self.database = db_config[db_type]['database']
         self.connection = sql_connection.get_sql_connection()
@@ -93,7 +94,7 @@ class DTARunner:
                     open(self.workload_file_last_run, 'a+') as workload_file_last_run:
                 for query in self.queries[queries_start:queries_end]:
                     query_string = query['query_string']
-                    cost, index_seeks, clustered_index_scans = sql_helper.execute_query_v1(self.connection, query_string)
+                    cost, index_seeks, clustered_index_scans = sql_helper.execute_query_v1(self.connection, query_string, self.db_type)
                     logging.info(f"Query {query['id']} cost: {cost}")
                     execution_cost_round += cost
                     workload_file.write(query_string)
