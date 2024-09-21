@@ -3,7 +3,7 @@ import logging
 import operator
 import pprint
 from importlib import reload
-from typing import Dict
+from typing import Dict, List
 
 import numpy
 from pandas import DataFrame
@@ -18,6 +18,7 @@ import shared.helper as helper
 from bandits.experiment_report import ExpReport
 from bandits.oracle_v2 import OracleV7 as Oracle
 from bandits.query_v5 import Query
+from bandits.bandit_arm import BanditArm
 
 
 # Simulation built on vQ to collect the super arm performance
@@ -53,6 +54,7 @@ class Simulator(BaseSimulator):
         super_arm_counts = {}
         best_super_arm = set()
 
+        sql_helper.remove_all_non_clustered(self.connection, 'dbo')
         logging.info("Logging configs...\n")
         helper.log_configs(logging, configs)
         logging.info("Logging constants...\n")
@@ -82,7 +84,7 @@ class Simulator(BaseSimulator):
 
         total_time = 0.0
 
-        for t in range((configs.rounds + configs.hyp_rounds)):
+        for t in range((configs.rounds + configs.hyp_rounds)):  # for each round of workloads
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
             start_time_round = datetime.datetime.now()
@@ -121,7 +123,8 @@ class Simulator(BaseSimulator):
                 query_obj_list_current.append(self.query_obj_store[query_id])
 
             # This list contains all past queries, we don't include new queries seen for the first time.
-            query_obj_list_past, query_obj_list_new = [], []
+            query_obj_list_past: List[Query] = []
+            query_obj_list_new: List[Query] = []
             for key, obj in self.query_obj_store.items():
                 if t - obj.last_seen_round <= constants.QUERY_MEMORY\
                     and 0 <= obj.first_seen_round < t: # Have seen in previous rounds
@@ -143,7 +146,7 @@ class Simulator(BaseSimulator):
             query_obj_additions = query_obj_list_new
 
             # Get the predicates for queries and Generate index arms for each query
-            index_arms = {}
+            index_arms: Dict[str, BanditArm] = {}
             for i in range(len(query_obj_list_past)):  # for each previously seen query
                 bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.connection, query_obj_list_past[i])
                 for key, index_arm in bandit_arms_tmp.items():
@@ -180,12 +183,12 @@ class Simulator(BaseSimulator):
             # getting the super arm from the bandit
             chosen_arm_ids = c3ucb_bandit.select_arm_v2(context_vectors, t)
             if t >= configs.hyp_rounds and t - configs.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
-                chosen_arm_ids = list(best_super_arm)
+                chosen_arm_ids: List[int] = list(best_super_arm)
 
             # get objects for the chosen set of arm ids
             chosen_arms = {}
             used_memory = 0
-            if chosen_arm_ids:
+            if chosen_arm_ids:  # update arm_selection_count dict for each index
                 chosen_arms = {}
                 for arm in chosen_arm_ids:
                     index_name = index_arm_list[arm].index_name

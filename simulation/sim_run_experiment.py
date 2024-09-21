@@ -5,6 +5,8 @@ import logging
 from pandas import DataFrame
 import pandas as pd
 
+import sys
+sys.path.append('/home/sclai/project/DBABandits/')
 import constants
 from bandits.experiment_report import ExpReport
 from database.config_test_run import ConfigRunner

@@ -3,12 +3,15 @@ from abc import abstractmethod
 
 import numpy
 
+import sys
+sys.path.append("/home/sclai/project/DBABandits/")
 import constants
+from bandits.oracle_v2 import OracleV7
 
 
 class C3UCBBaseBandit:
 
-    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle):
+    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle: OracleV7):
         self.arms = []
         self.alpha_original = hyper_alpha
         self.hyper_alpha = hyper_alpha
