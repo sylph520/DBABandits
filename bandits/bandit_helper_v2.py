@@ -4,13 +4,11 @@ from typing import Dict
 import numpy
 
 import constants as constants
-import database.sql_helper_v2 as sql_helper
 from bandits.bandit_arm import BanditArm
+from database.dbconn import DBConnection
 
-bandit_arm_store = {}
 
-
-def gen_arms_from_predicates_v2(connection, query_obj):
+def gen_arms_from_predicates_v2(connection: DBConnection, query_obj):
     """
     This method take predicates (a dictionary of lists) as input and creates the generate arms for all possible
     column combinations
@@ -19,62 +17,65 @@ def gen_arms_from_predicates_v2(connection, query_obj):
     :param query_obj: Query object
     :return: list of bandit arms
     """
-    bandit_arms: Dict[id, BanditArm] = {}
+    q_bandit_arms: Dict[int, BanditArm] = {}
     predicates = query_obj.predicates
-    payloads = query_obj.payload
-    query_id = query_obj.id
-    tables = sql_helper.get_tables(connection)
-    for table_name, table_predicates in predicates.items():
+    q_payloads = query_obj.payload
+    query_id = query_obj.id  # int
+    tables = connection.tables_global
+    for table_name, table_predicates in predicates.items():  # generate & update arms from predicates
         table = tables[table_name]
         includes = []
-        if table_name in payloads:
-            includes = list(set(payloads[table_name]) - set(table_predicates))
+        if table_name in q_payloads:
+            includes = list(set(q_payloads[table_name]) - set(table_predicates))
         if table.table_row_count < constants.SMALL_TABLE_IGNORE or (
                 query_obj.selectivity[table_name] > constants.TABLE_MIN_SELECTIVITY and len(includes) > 0):
             continue
+
         col_permutations = []
-        if len(table_predicates) > 6:
+        if len(table_predicates) > 6:  # TODO: truncate the first predicates?
             table_predicates = table_predicates[0:6]
         for j in range(1, (len(table_predicates) + 1)):
             col_permutations = col_permutations + list(itertools.permutations(table_predicates, j))
         for col_permutation in col_permutations:
-            arm_id = BanditArm.get_arm_id(col_permutation, table_name)
+            arm_str_id = BanditArm.get_arm_str_id(col_permutation, table_name, db_type=connection.db_type)
             table_row_count = table.table_row_count
             arm_value = (1 - query_obj.selectivity[table_name]) * (
-                        len(col_permutation) / len(table_predicates)) * table_row_count
-            if arm_id in bandit_arm_store:
-                bandit_arm = bandit_arm_store[arm_id]
-                bandit_arm.query_id = query_id
+                len(col_permutation) / len(table_predicates)) * table_row_count
+            if arm_str_id in connection.bandit_arm_store:  # update the value of arm if it already exists
+                bandit_arm = connection.bandit_arm_store[arm_str_id]
+                # bandit_arm.query_id = query_id
                 if query_id in bandit_arm.arm_value:
                     bandit_arm.arm_value[query_id] += arm_value
-                    bandit_arm.arm_value[query_id] /= 2
+                    bandit_arm.arm_value[query_id] /= 2  # TODO: add then halve???
                 else:
                     bandit_arm.arm_value[query_id] = arm_value
-            else:
-                size = sql_helper.get_estimated_size_of_index_v1(connection, constants.SCHEMA_NAME,
-                                                                 table_name, col_permutation)
-                bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count)
-                bandit_arm.query_id = query_id
+            else:  # create a new arm
+                est_idx_size = connection.get_estimated_size_of_index_v1(
+                    constants.SCHEMA_NAME, table_name, col_permutation)
+                bandit_arm = BanditArm(col_permutation, table_name, est_idx_size,
+                                       table_row_count, db_type=connection.db_type)
+                # bandit_arm.query_id = query_id
                 if len(col_permutation) == len(table_predicates):
                     bandit_arm.cluster = table_name + '_' + str(query_id) + '_all'
                     if len(includes) == 0:
                         bandit_arm.is_include = 1
                 bandit_arm.arm_value[query_id] = arm_value
-                bandit_arm_store[arm_id] = bandit_arm
-            if bandit_arm not in bandit_arms:
-                bandit_arms[arm_id] = bandit_arm
+                connection.bandit_arm_store[arm_str_id] = bandit_arm
+            if bandit_arm not in q_bandit_arms:
+                q_bandit_arms[arm_str_id] = bandit_arm
 
-    for table_name, table_payloads in payloads.items():
+    for table_name, table_payloads in q_payloads.items():
         if table_name not in predicates:
             table = tables[table_name]
             if table.table_row_count < constants.SMALL_TABLE_IGNORE:
                 continue
             col_permutation = table_payloads
-            arm_id = BanditArm.get_arm_id(col_permutation, table_name)
+            arm_str_id = BanditArm.get_arm_str_id(col_permutation, table_name,
+                                                  db_type=connection.db_type)
             table_row_count = table.table_row_count
             arm_value = 0.001 * table_row_count
-            if arm_id in bandit_arm_store:
-                bandit_arm = bandit_arm_store[arm_id]
+            if arm_str_id in connection.bandit_arm_store:
+                bandit_arm = connection.bandit_arm_store[arm_str_id]
                 bandit_arm.query_id = query_id
                 if query_id in bandit_arm.arm_value:
                     bandit_arm.arm_value[query_id] += arm_value
@@ -82,16 +83,17 @@ def gen_arms_from_predicates_v2(connection, query_obj):
                 else:
                     bandit_arm.arm_value[query_id] = arm_value
             else:
-                size = sql_helper.get_estimated_size_of_index_v1(connection, constants.SCHEMA_NAME,
-                                                                 table_name, col_permutation)
-                bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count)
+                est_idx_size = connection.get_estimated_size_of_index_v1(constants.SCHEMA_NAME,
+                                                                         table_name, col_permutation)
+                bandit_arm = BanditArm(col_permutation, table_name, est_idx_size, table_row_count,
+                                       db_type=connection.db_type)
                 bandit_arm.query_id = query_id
                 bandit_arm.cluster = table_name + '_' + str(query_id) + '_all'
                 bandit_arm.is_include = 1
                 bandit_arm.arm_value[query_id] = arm_value
-                bandit_arm_store[arm_id] = bandit_arm
-            if bandit_arm not in bandit_arms:
-                bandit_arms[arm_id] = bandit_arm
+                connection.bandit_arm_store[arm_str_id] = bandit_arm
+            if bandit_arm not in q_bandit_arms:
+                q_bandit_arms[arm_str_id] = bandit_arm
 
     if constants.INDEX_INCLUDES:
         for table_name, table_predicates in predicates.items():
@@ -99,36 +101,35 @@ def gen_arms_from_predicates_v2(connection, query_obj):
             if table.table_row_count < constants.SMALL_TABLE_IGNORE:
                 continue
             includes = []
-            if table_name in payloads:
-                includes = sorted(list(set(payloads[table_name]) - set(table_predicates)))
+            if table_name in q_payloads:
+                includes = sorted(list(set(q_payloads[table_name]) - set(table_predicates)))
             if includes:
                 col_permutations = list(itertools.permutations(table_predicates, len(table_predicates)))
                 for col_permutation in col_permutations:
-                    arm_id_with_include = BanditArm.get_arm_id(col_permutation, table_name, includes)
+                    arm_id_with_include = BanditArm.get_arm_str_id(col_permutation, table_name, includes, db_type=connection.db_type)
                     table_row_count = table.table_row_count
                     arm_value = (1 - query_obj.selectivity[table_name]) * table_row_count
-                    if arm_id_with_include not in bandit_arm_store:
-                        size_with_includes = sql_helper.get_estimated_size_of_index_v1(connection,
-                                                                                       constants.SCHEMA_NAME,
+                    if arm_id_with_include not in connection.bandit_arm_store:
+                        size_with_includes = connection.get_estimated_size_of_index_v1(constants.SCHEMA_NAME,
                                                                                        table_name,
                                                                                        col_permutation + tuple(
                                                                                            includes))
                         bandit_arm = BanditArm(col_permutation, table_name, size_with_includes, table_row_count,
-                                               includes)
+                                               includes, db_type=connection.db_type)
                         bandit_arm.is_include = 1
                         bandit_arm.query_id = query_id
                         bandit_arm.cluster = table_name + '_' + str(query_id) + '_all'
                         bandit_arm.arm_value[query_id] = arm_value
-                        bandit_arm_store[arm_id_with_include] = bandit_arm
+                        connection.bandit_arm_store[arm_id_with_include] = bandit_arm
                     else:
-                        bandit_arm_store[arm_id_with_include].query_id = query_id
-                        if query_id in bandit_arm_store[arm_id_with_include].arm_value:
-                            bandit_arm_store[arm_id_with_include].arm_value[query_id] += arm_value
-                            bandit_arm_store[arm_id_with_include].arm_value[query_id] /= 2
+                        connection.bandit_arm_store[arm_id_with_include].query_id = query_id
+                        if query_id in connection.bandit_arm_store[arm_id_with_include].arm_value:
+                            connection.bandit_arm_store[arm_id_with_include].arm_value[query_id] += arm_value
+                            connection.bandit_arm_store[arm_id_with_include].arm_value[query_id] /= 2
                         else:
-                            bandit_arm_store[arm_id_with_include].arm_value[query_id] = arm_value
-                    bandit_arms[arm_id_with_include] = bandit_arm_store[arm_id_with_include]
-    return bandit_arms
+                            connection.bandit_arm_store[arm_id_with_include].arm_value[query_id] = arm_value
+                    q_bandit_arms[arm_id_with_include] = connection.bandit_arm_store[arm_id_with_include]
+    return q_bandit_arms
 
 
 def gen_arms_from_predicates_single(connection, query_obj):
@@ -140,10 +141,10 @@ def gen_arms_from_predicates_single(connection, query_obj):
     :param query_obj: Query object
     :return: list of bandit arms
     """
-    bandit_arms = {}
+    q_bandit_arms = {}
     predicates = query_obj.predicates
     query_id = query_obj.id
-    tables = sql_helper.get_tables(connection)
+    tables = connection.get_tables()
     includes = []
     for table_name, table_predicates in predicates.items():
         table = tables[table_name]
@@ -151,17 +152,17 @@ def gen_arms_from_predicates_single(connection, query_obj):
                 query_obj.selectivity[table_name] > constants.TABLE_MIN_SELECTIVITY and len(includes) > 0):
             continue
         col_permutations = []
-        #TODO: truncates predicates?
+        # TODO: truncates predicates?
         if len(table_predicates) > 6:
             table_predicates = table_predicates[0:6]
         col_permutations = col_permutations + list(itertools.permutations(table_predicates, 1))
         for col_permutation in col_permutations:
-            arm_id = BanditArm.get_arm_id(col_permutation, table_name)
+            arm_id = BanditArm.get_arm_str_id(col_permutation, table_name, db_type=connection.db_type)
             table_row_count = table.table_row_count
             arm_value = (1 - query_obj.selectivity[table_name]) * (
-                        len(col_permutation) / len(table_predicates)) * table_row_count
-            if arm_id in bandit_arm_store:
-                bandit_arm = bandit_arm_store[arm_id]
+                len(col_permutation) / len(table_predicates)) * table_row_count
+            if arm_id in connection.bandit_arm_store:
+                bandit_arm = connection.bandit_arm_store[arm_id]
                 bandit_arm.query_id = query_id
                 if query_id in bandit_arm.arm_value:
                     bandit_arm.arm_value[query_id] += arm_value
@@ -169,21 +170,21 @@ def gen_arms_from_predicates_single(connection, query_obj):
                 else:
                     bandit_arm.arm_value[query_id] = arm_value
             else:
-                size = sql_helper.get_estimated_size_of_index_v1(connection, constants.SCHEMA_NAME,
+                size = connection.get_estimated_size_of_index_v1(constants.SCHEMA_NAME,
                                                                  table_name, col_permutation)
-                bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count)
+                bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count, db_type=connection.db_type)
                 bandit_arm.query_id = query_id
                 if len(col_permutation) == len(table_predicates):
                     bandit_arm.cluster = table_name + '_' + str(query_id) + '_all'
                     if len(includes) == 0:
                         bandit_arm.is_include = 1
                 bandit_arm.arm_value[query_id] = arm_value
-                bandit_arm_store[arm_id] = bandit_arm
-            if bandit_arm not in bandit_arms:
-                bandit_arms[arm_id] = bandit_arm
+                connection.bandit_arm_store[arm_id] = bandit_arm
+            if bandit_arm not in q_bandit_arms:
+                q_bandit_arms[arm_id] = bandit_arm
                 # print(arm_id)
 
-    return bandit_arms
+    return q_bandit_arms
 # ========================== Context Vectors ==========================
 
 
@@ -279,7 +280,7 @@ def get_derived_value_context_vectors_v3(connection, bandit_arm_dict, query_obj_
     :return: list of context vectors
     """
     context_vectors = []
-    database_size = sql_helper.get_database_size(connection)
+    database_size = connection.get_database_size()
     for key, bandit_arm in bandit_arm_dict.items():
         keys_last_round = set(chosen_arms_last_round.keys())
         if bandit_arm.index_name not in keys_last_round:
@@ -288,7 +289,7 @@ def get_derived_value_context_vectors_v3(connection, bandit_arm_dict, query_obj_
             index_size = 0
         context_vector = numpy.array([
             bandit_arm.index_usage_last_batch,
-            index_size/database_size,
+            index_size / database_size,
             bandit_arm.is_include if with_includes else 0
         ], ndmin=2).transpose()
         context_vectors.append(context_vector)
@@ -314,7 +315,7 @@ def get_query_context_v1(query_object, all_columns, context_size):
         for table_name in all_columns:
             for k in range(len(all_columns[table_name])):
                 context_vector[i] = 1 if table_name in query_object.predicates and all_columns[table_name][k] in \
-                                         query_object.predicates[table_name] else 0
+                    query_object.predicates[table_name] else 0
                 i += 1
         query_object.context = context_vector
     return context_vector

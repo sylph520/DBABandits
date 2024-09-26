@@ -7,7 +7,6 @@ import constants
 
 
 class C3UCBBaseBandit:
-
     def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle):
         self.arms = []
         self.alpha_original = hyper_alpha
@@ -30,7 +29,6 @@ class C3UCBBaseBandit:
 
 
 class C3UCB(C3UCBBaseBandit):
-
     def select_arm(self, context_vectors, current_round):
         pass
 
@@ -125,4 +123,3 @@ class C3UCB(C3UCBBaseBandit):
                 self.hyper_alpha = self.alpha_original
             self.v = self.hyper_lambda * numpy.identity(self.context_size) + forget_factor * self.v
             self.b = forget_factor * self.b
-

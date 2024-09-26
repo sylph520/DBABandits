@@ -119,4 +119,3 @@ class OracleDDQN(BaseOracle):
                 arm_ucb_dict.pop(max_ucb_arm_id)
 
         return chosen_arms
-

@@ -10,6 +10,8 @@ from pandas import DataFrame
 
 import constants
 
+# plotting
+
 
 def plot_histogram(statistics_dict, title, experiment_id):
     """
@@ -28,7 +30,7 @@ def plot_histogram(statistics_dict, title, experiment_id):
     plt.show()
 
 
-def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id):
+def plot_histogram_v2(statistics_dict, window_size, title, experiment_id):
     """
     Simple plot function to plot the average reward, and a line to show the best possible reward
 
@@ -37,7 +39,7 @@ def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id):
     :param title: title of the plot
     :param experiment_id: id of the current experiment
     """
-    crop_amount = int(np.ceil(window_size/2))
+    crop_amount = int(np.ceil(window_size / 2))
     for statistic_name, statistic_histogram in statistics_dict.items():
         plt.plot(statistic_histogram[crop_amount:-crop_amount], label=statistic_name)
     plt.title(title)
@@ -53,7 +55,7 @@ def get_experiment_folder_path(experiment_id):
     :param experiment_id: name of the experiment
     :return: file path as string
     """
-    experiment_folder_path = constants.ROOT_DIR + constants.EXPERIMENT_FOLDER + '\\' + experiment_id + '\\'
+    experiment_folder_path = constants.ROOT_DIR + constants.EXPERIMENT_FOLDER + '/' + experiment_id + '/'
     if not os.path.exists(experiment_folder_path):
         os.makedirs(experiment_folder_path)
     return experiment_folder_path
@@ -104,19 +106,41 @@ def plot_moving_average(statistic_dict, window_size, title, experiment_id):
     plot_histogram_v2(statistic_avg_dict, window_size, title, experiment_id)
 
 
-def get_queries_v2():
+def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False):
+    """
+    Creates a plot for several experiment reports
+    :param exp_id: ID of the experiment
+    :param exp_report_list: This can contain several exp report objects
+    :param measurement_names: What measurement that we will use for y
+    :param log_y: draw y axis in log scale
+    """
+    for measurement_name in measurement_names:
+        comps = []
+        final_df = DataFrame()
+        for exp_report in exp_report_list:
+            df = exp_report.data
+            df[constants.DF_COL_COMP_ID] = exp_report.component_id
+            final_df = pd.concat([final_df, df])
+            comps.append(exp_report.component_id)
+
+        final_df = final_df[final_df[constants.DF_COL_MEASURE_NAME] == measurement_name]
+        # Error style = 'band' / 'bars'
+        sns_plot = sns.relplot(x=constants.DF_COL_BATCH, y=constants.DF_COL_MEASURE_VALUE, hue=constants.DF_COL_COMP_ID,
+                               kind="line", ci="sd", data=final_df, err_style="band")
+        if log_y:
+            sns_plot.set(yscale="log")
+        plot_title = measurement_name + " Comparison"
+        sns_plot.set(xlabel=constants.DF_COL_BATCH, ylabel=measurement_name)
+        sns_plot.savefig(get_experiment_folder_path(exp_id) + plot_title + '.png')
+
+# db related
+
+
+def get_queries_v2(workload_file) -> list:
     """
     Read all the queries in the queries pointed by the QUERY_DICT_FILE constant
     :return: list of queries
     """
-    # Reading the configuration for given experiment ID
-    exp_config = configparser.ConfigParser()
-    exp_config.read(constants.ROOT_DIR + constants.EXPERIMENT_CONFIG)
-
-    # experiment id for the current run
-    experiment_id = exp_config['general']['run_experiment']
-    workload_file = str(exp_config[experiment_id]['workload_file'])
-
     queries = []
     with open(constants.ROOT_DIR + workload_file) as f:
         line = f.readline()
@@ -163,34 +187,6 @@ def update_dict_list(current, new):
     return current
 
 
-def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False):
-    """
-    Creates a plot for several experiment reports
-    :param exp_id: ID of the experiment
-    :param exp_report_list: This can contain several exp report objects
-    :param measurement_names: What measurement that we will use for y
-    :param log_y: draw y axis in log scale
-    """
-    for measurement_name in measurement_names:
-        comps = []
-        final_df = DataFrame()
-        for exp_report in exp_report_list:
-            df = exp_report.data
-            df[constants.DF_COL_COMP_ID] = exp_report.component_id
-            final_df = pd.concat([final_df, df])
-            comps.append(exp_report.component_id)
-
-        final_df = final_df[final_df[constants.DF_COL_MEASURE_NAME] == measurement_name]
-        # Error style = 'band' / 'bars'
-        sns_plot = sns.relplot(x=constants.DF_COL_BATCH, y=constants.DF_COL_MEASURE_VALUE, hue=constants.DF_COL_COMP_ID,
-                               kind="line", ci="sd", data=final_df, err_style="band")
-        if log_y:
-            sns_plot.set(yscale="log")
-        plot_title = measurement_name + " Comparison"
-        sns_plot.set(xlabel=constants.DF_COL_BATCH, ylabel=measurement_name)
-        sns_plot.savefig(get_experiment_folder_path(exp_id) + plot_title + '.png')
-
-
 def create_comparison_tables(exp_id, exp_report_list):
     """
     Create a CSV with numbers that are important for the comparison
@@ -226,7 +222,7 @@ def create_comparison_tables(exp_id, exp_report_list):
 
 # todo - remove min and max
 def get_avg_measure_value(data, measure_name, reps):
-    return (data[data[constants.DF_COL_MEASURE_NAME] == measure_name][constants.DF_COL_MEASURE_VALUE].sum())/reps
+    return (data[data[constants.DF_COL_MEASURE_NAME] == measure_name][constants.DF_COL_MEASURE_VALUE].sum()) / reps
 
 
 def get_sum_measure_value(data, measure_name):

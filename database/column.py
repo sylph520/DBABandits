@@ -12,7 +12,7 @@ class Column:
     def get_id(self):
         return self.table_name + '_' + self.column_name
 
-    def set_max_column_size(self,  max_size):
+    def set_max_column_size(self, max_size):
         self.max_column_size = max_size
 
     @staticmethod

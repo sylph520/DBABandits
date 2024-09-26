@@ -4,11 +4,9 @@ import logging
 import os
 import subprocess
 import uuid
-from importlib import reload
 
 import constants
-import shared.configs_v2 as configs
-from database import sql_connection, sql_helper_v2 as sql_helper
+from database import dbconn as sql_helper
 from shared import helper
 
 
@@ -22,7 +20,15 @@ class DTARunner:
         self.db_type = db_type
         self.server = db_config[db_type]['server']
         self.database = db_config[db_type]['database']
-        self.connection = sql_connection.get_sql_connection()
+        db_conf_dict = {
+            "db_conf": {
+                "db_type": "postgresql",
+                "database": "tpch_010"
+            },
+            "exp_conf": {
+                "exp_id": "tpc_h_static_10_MAB"
+        }}
+        self.connection = sql_helper.DBConnection(db_conf_dict)
         self.workload_file_current = constants.ROOT_DIR + constants.WORKLOADS_FOLDER + '\\temp_workload_current.sql'
         self.workload_file_optimal = constants.ROOT_DIR + constants.WORKLOADS_FOLDER + '\\temp_workload_optimal.sql'
         self.workload_file_full = constants.ROOT_DIR + constants.WORKLOADS_FOLDER + '\\temp_workload_full.sql'
@@ -33,7 +39,7 @@ class DTARunner:
         self.uniform = uniform
 
     def run(self):
-        reload(configs)
+        # reload(self.exp_config)
         # resets the workload file
         workload_file = open(self.workload_file_current, 'w')
         workload_file.close()
@@ -45,22 +51,22 @@ class DTARunner:
 
         # setting up logging
         logging.basicConfig(
-            filename=helper.get_experiment_folder_path(configs.experiment_id) + configs.experiment_id + '.log',
+            filename=helper.get_experiment_folder_path(self.exp_config.experiment_id) + self.exp_config.experiment_id + '.log',
             filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
         logging.getLogger().setLevel(constants.LOGGING_LEVEL)
         logging.info(f"============= Starting TA session: {self.workload_type} =============")
 
         next_workload_shift = 0
         previous_workload_shift = 0
-        queries_start = configs.queries_start_list[next_workload_shift]
-        queries_end = configs.queries_end_list[next_workload_shift]
+        queries_start = self.exp_config.queries_start_list[next_workload_shift]
+        queries_end = self.exp_config.queries_end_list[next_workload_shift]
 
         # these variables will hold the overall values for each cost
         execution_cost = 0.0
         recommendation_cost = 0.0
         apply_cost = 0.0
 
-        for i in range(configs.rounds):
+        for i in range(self.exp_config.rounds):
             logging.info("Round :" + str(i))
             start_time_round = datetime.datetime.now()
             execution_cost_round = 0
@@ -80,11 +86,11 @@ class DTARunner:
                 workload_file_last_run.close()
 
             # check if workload shift is required
-            if i == configs.workload_shifts[next_workload_shift]:
-                queries_start = configs.queries_start_list[next_workload_shift]
-                queries_end = configs.queries_end_list[next_workload_shift]
+            if i == self.exp_config.workload_shifts[next_workload_shift]:
+                queries_start = self.exp_config.queries_start_list[next_workload_shift]
+                queries_end = self.exp_config.queries_end_list[next_workload_shift]
                 previous_workload_shift = next_workload_shift
-                if len(configs.workload_shifts) > next_workload_shift + 1:
+                if len(self.exp_config.workload_shifts) > next_workload_shift + 1:
                     next_workload_shift += 1
 
             # executing the queries, we will write the queries the workload file after execution, this work as the
@@ -171,13 +177,13 @@ class DTARunner:
 
     def get_recommendations(self, workload_shift):
         # Tuning Parameters
-        reload(configs)
-        max_memory = configs.max_memory
-        session_name = configs.experiment_id + self.workload_type + "_" + str(uuid.uuid4())
-        experiment_folder_path = helper.get_experiment_folder_path(configs.experiment_id)
-        recommendation_output_file = experiment_folder_path + configs.experiment_id + "_" + str(workload_shift) + "_" + \
+        reload(self.exp_config)
+        max_memory = self.exp_config.max_memory
+        session_name = self.exp_config.experiment_id + self.workload_type + "_" + str(uuid.uuid4())
+        experiment_folder_path = helper.get_experiment_folder_path(self.exp_config.experiment_id)
+        recommendation_output_file = experiment_folder_path + self.exp_config.experiment_id + "_" + str(workload_shift) + "_" + \
             self.workload_type + "_dta_recommendation.sql"
-        session_output_xml_file = experiment_folder_path + configs.experiment_id + "_" + str(workload_shift) + "_" + \
+        session_output_xml_file = experiment_folder_path + self.exp_config.experiment_id + "_" + str(workload_shift) + "_" + \
             self.workload_type + "_dta_session_output.xml"
         if self.workload_type == constants.TA_WORKLOAD_TYPE_FULL:
             self.generate_full_workload_file()
@@ -205,15 +211,15 @@ class DTARunner:
 
     def generate_full_workload_file(self):
         next_workload_shift = 0
-        queries_start = configs.queries_start_list[next_workload_shift]
-        queries_end = configs.queries_end_list[next_workload_shift]
+        queries_start = self.exp_config.queries_start_list[next_workload_shift]
+        queries_end = self.exp_config.queries_end_list[next_workload_shift]
         with open(self.workload_file_full, 'w+') as workload_file:
-            for i in range(configs.rounds):
+            for i in range(self.exp_config.rounds):
                 # check if workload shift is required
-                if i == configs.workload_shifts[next_workload_shift]:
-                    queries_start = configs.queries_start_list[next_workload_shift]
-                    queries_end = configs.queries_end_list[next_workload_shift]
-                    if len(configs.workload_shifts) > next_workload_shift + 1:
+                if i == self.exp_config.workload_shifts[next_workload_shift]:
+                    queries_start = self.exp_config.queries_start_list[next_workload_shift]
+                    queries_end = self.exp_config.queries_end_list[next_workload_shift]
+                    if len(self.exp_config.workload_shifts) > next_workload_shift + 1:
                         next_workload_shift += 1
 
                 # executing the queries, we will write the queries the workload file after execution, this work as the

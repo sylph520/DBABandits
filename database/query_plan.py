@@ -79,6 +79,7 @@ class QueryPlanPG:
         self.est_statement_sub_tree_cost = 0
         self.elapsed_time = 0
         self.cpu_time = 0
+        # each item is a tuple(index_name, elapsed_time, cpu_time, subtree_cost, rows_read, rows_output)
         self.non_clustered_index_usage = list()
         self.clustered_index_usage = list()
 

@@ -11,13 +11,13 @@ from pandas import DataFrame
 import bandits.rl_ddqn_v2 as bandits
 import bandits.bandit_helper_v2 as bandit_helper
 import constants as constants
-import database.sql_connection as sql_connection
-import database.sql_helper_v2 as sql_helper
-import shared.configs_v2 as configs
+import database.dbconn as sql_connection
+import database.dbconn as sql_helper
+# import shared.configs_v2 as self.exp_config
 import shared.helper as helper
 from bandits.experiment_report import ExpReport
 from bandits.oracle_v2 import OracleV7 as Oracle
-from bandits.query_v5 import Query
+from database.query_v5 import Query
 
 
 # Simulation built on vO to work on dynamic workloads
@@ -27,7 +27,7 @@ class BaseSimulator:
     def __init__(self):
         # configuring the logger
         logging.basicConfig(
-            filename=helper.get_experiment_folder_path(configs.experiment_id) + configs.experiment_id + '.log',
+            filename=helper.get_experiment_folder_path(self.exp_config.experiment_id) + self.exp_config.experiment_id + '.log',
             filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
         logging.getLogger().setLevel(logging.INFO)
 
@@ -42,7 +42,7 @@ class Simulator(BaseSimulator):
 
     def run(self):
         pp = pprint.PrettyPrinter()
-        reload(configs)
+        # reload(self.exp_config)
         # start_time_workload = datetime.datetime.now()
         results = []
 
@@ -52,8 +52,8 @@ class Simulator(BaseSimulator):
         context_size = number_of_columns + constants.STATIC_CONTEXT_SIZE
 
         # Create oracle and the bandit
-        configs.max_memory -= int(sql_helper.get_current_pds_size(self.connection))
-        oracle = Oracle(configs.max_memory)
+        self.exp_config.max_memory -= int(sql_helper.get_current_pds_size(self.connection))
+        oracle = Oracle(self.exp_config.max_memory)
         c3ucb_bandit = bandits.DDQN(context_size, oracle)
 
         # Running the bandit for T rounds and gather the reward
@@ -62,24 +62,24 @@ class Simulator(BaseSimulator):
         used_memory_hist = []
         chosen_arms_last_round = {}
         next_workload_shift = 0
-        queries_start = configs.queries_start_list[next_workload_shift]
-        queries_end = configs.queries_end_list[next_workload_shift]
+        queries_start = self.exp_config.queries_start_list[next_workload_shift]
+        queries_end = self.exp_config.queries_end_list[next_workload_shift]
         query_obj_additions = []
         setup_time_end = datetime.datetime.now()
         setup_time = (setup_time_end - setup_time_start).total_seconds()
         total_time = 0.0
 
-        for t in range((configs.rounds + configs.hyp_rounds)):
+        for t in range((self.exp_config.rounds + self.exp_config.hyp_rounds)):
             logging.info(f"round: {t}")
             start_time_round = datetime.datetime.now()
             # At the start of the round we will read the applicable set for the current round. This is a workaround
             # used to demo the dynamic query flow. We read the queries from the start and move the window each round
 
             # check if workload shift is required
-            if t - configs.hyp_rounds == configs.workload_shifts[next_workload_shift]:
-                queries_start = configs.queries_start_list[next_workload_shift]
-                queries_end = configs.queries_end_list[next_workload_shift]
-                if len(configs.workload_shifts) > next_workload_shift + 1:
+            if t - self.exp_config.hyp_rounds == self.exp_config.workload_shifts[next_workload_shift]:
+                queries_start = self.exp_config.queries_start_list[next_workload_shift]
+                queries_end = self.exp_config.queries_end_list[next_workload_shift]
+                if len(self.exp_config.workload_shifts) > next_workload_shift + 1:
                     next_workload_shift += 1
 
             # New set of queries in this batch, required for query execution
@@ -137,7 +137,7 @@ class Simulator(BaseSimulator):
                     index_arms[key].query_ids_backup.add(index_arm.query_id)
 
             # set the index arms at the bandit
-            if t == configs.hyp_rounds and configs.hyp_rounds != 0:
+            if t == self.exp_config.hyp_rounds and self.exp_config.hyp_rounds != 0:
                 index_arms = {}
             index_arm_list = list(index_arms.values())
             logging.info(f"Generated {len(index_arm_list)} arms")
@@ -162,7 +162,6 @@ class Simulator(BaseSimulator):
             else:
                 chosen_arm_ids = []
 
-
             # get objects for the chosen set of arm ids
             chosen_arms = {}
             used_memory = 0
@@ -178,7 +177,7 @@ class Simulator(BaseSimulator):
                         arm_selection_count[index_name] = 1
 
             # clean everything at start of actual rounds
-            if configs.hyp_rounds != 0 and t == configs.hyp_rounds:
+            if self.exp_config.hyp_rounds != 0 and t == self.exp_config.hyp_rounds:
                 sql_helper.bulk_drop_index(self.connection, constants.SCHEMA_NAME, chosen_arms_last_round)
                 chosen_arms_last_round = {}
 
@@ -200,7 +199,7 @@ class Simulator(BaseSimulator):
                 deleted_arms[key] = chosen_arms_last_round[key]
 
             start_time_create_query = datetime.datetime.now()
-            if t < configs.hyp_rounds:
+            if t < self.exp_config.hyp_rounds:
                 time_taken, creation_cost_dict, arm_rewards = sql_helper.hyp_create_query_drop_v1(self.connection, constants.SCHEMA_NAME,
                                                                                                   chosen_arms, added_arms, deleted_arms,
                                                                                                   query_obj_list_current)
@@ -212,12 +211,12 @@ class Simulator(BaseSimulator):
                                                                                               query_obj_list_current)
             end_time_create_query = datetime.datetime.now()
             creation_cost = sum(creation_cost_dict.values())
-            if t == configs.hyp_rounds and configs.hyp_rounds != 0:
+            if t == self.exp_config.hyp_rounds and self.exp_config.hyp_rounds != 0:
                 hyp_statistic_dict = defaultdict(list)
                 hyp_statistic_dict['Optimizer cost'] = time_taken_hist.copy()
                 helper.plot_moving_average(hyp_statistic_dict, constants.WINDOW_SIZE,
-                                           f'Optimizer Cost Over {configs.hyp_rounds} Rounds',
-                                           configs.experiment_id)
+                                           f'Optimizer Cost Over {self.exp_config.hyp_rounds} Rounds',
+                                           self.exp_config.experiment_id)
                 # logging arm usage counts
                 logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
                     sorted(arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
@@ -232,19 +231,19 @@ class Simulator(BaseSimulator):
             # keeping track of queries that we saw last time
             chosen_arms_last_round = chosen_arms
 
-            if t == (configs.rounds + configs.hyp_rounds - 1):
+            if t == (self.exp_config.rounds + self.exp_config.hyp_rounds - 1):
                 sql_helper.bulk_drop_index(self.connection, constants.SCHEMA_NAME, chosen_arms)
 
             end_time_round = datetime.datetime.now()
             # Adding information to the results array
-            if t >= configs.hyp_rounds:
-                actual_round_number = t - configs.hyp_rounds
+            if t >= self.exp_config.hyp_rounds:
+                actual_round_number = t - self.exp_config.hyp_rounds
                 recommendation_time = (end_time_round - start_time_round).total_seconds() - (
-                            end_time_create_query - start_time_create_query).total_seconds()
-                total_round_time = creation_cost/1000 + time_taken/1000 + recommendation_time
+                    end_time_create_query - start_time_create_query).total_seconds()
+                total_round_time = creation_cost / 1000 + time_taken / 1000 + recommendation_time
                 results.append([actual_round_number, constants.MEASURE_BATCH_TIME, total_round_time])
-                results.append([actual_round_number, constants.MEASURE_INDEX_CREATION_COST, creation_cost/1000])
-                results.append([actual_round_number, constants.MEASURE_QUERY_EXECUTION_COST, time_taken/1000])
+                results.append([actual_round_number, constants.MEASURE_INDEX_CREATION_COST, creation_cost / 1000])
+                results.append([actual_round_number, constants.MEASURE_QUERY_EXECUTION_COST, time_taken / 1000])
                 results.append(
                     [actual_round_number, constants.MEASURE_INDEX_RECOMMENDATION_COST, recommendation_time])
                 results.append([actual_round_number, constants.MEASURE_MEMORY_COST, used_memory])
@@ -256,7 +255,7 @@ class Simulator(BaseSimulator):
         # end_time_workload = datetime.datetime.now()
         # logging arm usage counts and time spent
         # total_time = (end_time_workload - start_time_workload).total_seconds()
-        logging.info("Time taken by DDQN for " + str(configs.rounds) + " rounds: " + str(total_time))
+        logging.info("Time taken by DDQN for " + str(self.exp_config.rounds) + " rounds: " + str(total_time))
         logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
             sorted(arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
 
@@ -265,8 +264,9 @@ class Simulator(BaseSimulator):
 
 if __name__ == "__main__":
     # Running MAB
-    exp_report_mab = ExpReport(configs.experiment_id, constants.COMPONENT_MAB, configs.reps, configs.rounds)
-    for r in range(configs.reps):
+    exp_config = {}
+    exp_report_mab = ExpReport(exp_config.experiment_id, constants.COMPONENT_MAB, exp_config.reps, exp_config.rounds)
+    for r in range(exp_config.reps):
         simulator = Simulator()
         results, total_workload_time = simulator.run()
         temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
@@ -276,4 +276,4 @@ if __name__ == "__main__":
         exp_report_mab.add_data_list(temp)
 
     # plot line graphs
-    helper.plot_exp_report(configs.experiment_id, [exp_report_mab], constants.MEASURE_BATCH_TIME)
+    helper.plot_exp_report(exp_config.experiment_id, [exp_report_mab], constants.MEASURE_BATCH_TIME)

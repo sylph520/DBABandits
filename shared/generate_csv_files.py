@@ -1,9 +1,12 @@
+"""
+generate csv files from exp reports results
+"""
 import pickle
 from importlib import reload
 
 from pandas import DataFrame
 
-import constants
+# import constants
 from shared import configs_v2 as configs, helper
 
 # Define Experiment ID list that we need to run
@@ -24,11 +27,11 @@ def create_data_csv(exp_id, exp_report_list_inner):
     for exp_report in exp_report_list_inner:
         data = exp_report.data
         component = exp_report.component_id
-        separator = DataFrame({' ': ' ', 'Component Name': [component.replace(exp_id,'')]})
+        separator = DataFrame({' ': ' ', 'Component Name': [component.replace(exp_id, '')]})
 
         # group by reps
         data = data.groupby(["Batch Number", "Measurement Name"]).mean().reset_index()
-        data = data.pivot(index="Measurement Name", columns="Batch Number",values="Measurement Value").fillna(
+        data = data.pivot(index="Measurement Name", columns="Batch Number", values="Measurement Value").fillna(
             0.000000).round(6).rename(index={'Batch Time': 'Total Cost', 'Index Creation Time': 'Index Creation Cost'})
         if 'Index Recommendation Cost' not in data.index:
             recommendation_cost = data.loc['Total Cost'] - data.loc['Index Creation Cost'] - data.loc['Query Execution Cost']
