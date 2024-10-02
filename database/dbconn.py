@@ -7,14 +7,15 @@ import logging
 import subprocess
 import traceback
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
 import psycopg2
 import pyodbc
 import sqlglot
 
 import constants
-from database.query_plan import QueryPlan, QueryPlanPG
+from database.query_v5 import Query
+from database.query_plan import QueryPlan_MSSQL, QueryPlanPG
 from database.column import Column
 from database.table import Table
 from bandits.bandit_arm import BanditArm
@@ -30,6 +31,7 @@ class DBConnection():
         host:
         port:
         """
+        self.db_conf_dict = db_conf_dict
         self.connection = self.get_sql_connection(db_conf_dict)
         self.db_type = self.get_connection_type(self.connection)
         self.pk_columns_dict = {}
@@ -41,7 +43,9 @@ class DBConnection():
         self.database = db_conf_dict['database']
         self.benchmark_type = self.database[:-4].upper()
         self.table_scan_times_hyp = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
-        self.table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
+        self.conn_table_scan_time_dict = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
+        self.conn_cluster_idx_scan_time_dict = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
+        self.conn_noncluster_idx_scan_time_dict = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
 
     def close_sql_connection(self):
         """
@@ -84,15 +88,15 @@ class DBConnection():
 
             logging.info(f"Added: {idx_name}")
             # Return the current reward
-            query_plan = QueryPlan(stat_xml)
+            query_plan = QueryPlan_MSSQL(stat_xml)
             if constants.COST_TYPE_CURRENT_CREATION == constants.COST_TYPE_ELAPSED_TIME:
-                return float(query_plan.elapsed_time)
+                return float(query_plan.stmt_elapsed_time)
             elif constants.COST_TYPE_CURRENT_CREATION == constants.COST_TYPE_CPU_TIME:
                 return float(query_plan.cpu_time)
             elif constants.COST_TYPE_CURRENT_CREATION == constants.COST_TYPE_SUB_TREE_COST:
-                return float(query_plan.est_statement_sub_tree_cost)
+                return float(query_plan.est_statement_cost)
             else:
-                return float(query_plan.est_statement_sub_tree_cost)
+                return float(query_plan.est_statement_cost)
         elif self.db_type == "postgresql":
             if hypo:
                 if include_cols:
@@ -103,16 +107,16 @@ class DBConnection():
                 query = f"SELECT * FROM hypopg_create_index('{query}');"
             cursor.execute(query)
             res = cursor.fetchone()
-            oid, hypo_idx_name = res
             self.connection.commit()
+            oid, hypo_idx_name = res
+
             hypo_exp_qry = "explain (format json) " + query
             cursor.execute(hypo_exp_qry)
             res2 = cursor.fetchone()
-            cost = res2[0][0]["Plan"]['Total Cost']
+            self.connection.commit()
+            est_hypopg_idx_creation_cost = res2[0][0]["Plan"]['Total Cost']
             logging.info(f"Added: {idx_name}")
-            # Return the current reward
-            # query_plan = QueryPlanPG(stat_xml)
-            return cost, oid, hypo_idx_name
+            return est_hypopg_idx_creation_cost, oid, hypo_idx_name
         else:
             raise NotImplementedError
 
@@ -130,16 +134,16 @@ class DBConnection():
         stat_xml = cursor.fetchone()[0]
         cursor.execute("SET STATISTICS XML OFF")
         self.connection.commit()
-        query_plan = QueryPlan(stat_xml)
+        query_plan = QueryPlan_MSSQL(stat_xml)
 
         if constants.COST_TYPE_CURRENT_CREATION == constants.COST_TYPE_ELAPSED_TIME:
-            return float(query_plan.elapsed_time)
+            return float(query_plan.stmt_elapsed_time)
         elif constants.COST_TYPE_CURRENT_CREATION == constants.COST_TYPE_CPU_TIME:
             return float(query_plan.cpu_time)
         elif constants.COST_TYPE_CURRENT_CREATION == constants.COST_TYPE_SUB_TREE_COST:
-            return float(query_plan.est_statement_sub_tree_cost)
+            return float(query_plan.est_statement_cost)
         else:
-            return float(query_plan.est_statement_sub_tree_cost)
+            return float(query_plan.est_statement_cost)
 
     def create_statistics(self, query):
         """
@@ -165,25 +169,25 @@ class DBConnection():
         :param bandit_arm_list: list of BanditArm objects
         :return: cost (regret)
         """
-        cost = {}
+        idx_creation_cost_dict = {}
         for index_name, bandit_arm in bandit_arm_list.items():
             if db_type == "MSSQL":
-                cost[index_name] = self.create_index_v1(schema_name,
-                                                        bandit_arm.table_name,
-                                                        bandit_arm.index_cols,
-                                                        bandit_arm.index_name,
-                                                        bandit_arm.include_cols)
+                idx_creation_cost_dict[index_name] = self.create_index_v1(schema_name,
+                                                                          bandit_arm.table_name,
+                                                                          bandit_arm.index_cols,
+                                                                          bandit_arm.index_name,
+                                                                          bandit_arm.include_cols)
                 self.set_arm_size(bandit_arm)
             elif db_type == "postgresql":
-                cost[index_name], oid, hypo_idx_name = self.create_index_v1(schema_name,
-                                                                            bandit_arm.table_name,
-                                                                            bandit_arm.index_cols,
-                                                                            bandit_arm.index_name,
-                                                                            bandit_arm.include_cols)
+                idx_creation_cost_dict[index_name], oid, hypo_idx_name = self.create_index_v1(schema_name,
+                                                                                              bandit_arm.table_name,
+                                                                                              bandit_arm.index_cols,
+                                                                                              bandit_arm.index_name,
+                                                                                              bandit_arm.include_cols)
                 bandit_arm.oid = oid
                 bandit_arm.hypopg_idx_name = hypo_idx_name
                 self.set_arm_size(bandit_arm)
-        return cost
+        return idx_creation_cost_dict
 
     def drop_index(self, schema_name, bandit_arm, db_type="postgresql"):
         """
@@ -241,6 +245,7 @@ class DBConnection():
         :param query: query that need to be executed
         :return: time taken for the query
         """
+        cost_type_current_execution = constants.COST_TYPE_CURRENT_CREATION
         try:
             cursor = self.connection.cursor()
             # get query plan instance wrt db_type
@@ -252,31 +257,31 @@ class DBConnection():
                 cursor.nextset()
                 stat_xml = cursor.fetchone()[0]
                 cursor.execute("SET STATISTICS XML OFF")
-                query_plan = QueryPlan(stat_xml)
+                query_plan = QueryPlan_MSSQL(stat_xml)
             elif self.db_type == "postgresql":
                 query = self.fix_tsql_to_psql(query)
                 cursor.execute(f"EXPLAIN (FORMAT JSON) {query}")
                 stat_xml = cursor.fetchone()[0][0]
-                query_plan = QueryPlanPG(stat_xml)
+                query_plan = QueryPlanPG(stat_xml, self)
+                cost_type_current_execution = constants.COST_TYPE_SUB_TREE_COST
             else:
-                raise NotImplementedError
+                raise NotImplementedError(f"database type {self.db_type} not supported yet.")
 
             # return wrt chosen cost type
-            if constants.COST_TYPE_CURRENT_EXECUTION == constants.COST_TYPE_ELAPSED_TIME:
-                return float(
-                    query_plan.elapsed_time), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
-            elif constants.COST_TYPE_CURRENT_EXECUTION == constants.COST_TYPE_CPU_TIME:
-                return float(query_plan.cpu_time), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
-            elif constants.COST_TYPE_CURRENT_EXECUTION == constants.COST_TYPE_SUB_TREE_COST:
-                return float(
-                    query_plan.est_statement_sub_tree_cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
+            if cost_type_current_execution == constants.COST_TYPE_ELAPSED_TIME:
+                qcost = query_plan.stmt_elapsed_time
+            elif cost_type_current_execution == constants.COST_TYPE_CPU_TIME:
+                qcost = query_plan.cpu_time
+            elif cost_type_current_execution == constants.COST_TYPE_SUB_TREE_COST:
+                qcost = query_plan.est_stmt_cost
             else:
-                return float(
-                    query_plan.est_statement_sub_tree_cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
-        except:
+                qcost = query_plan.est_statement_cost
+            return float(qcost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage, query_plan.table_scans
+        except psycopg2.OperationalError:
             print("Exception when executing query: ", query)
             traceback.print_exc()
-            return 0, [], []
+            # return 0, [], []
+            raise
 
     def get_table_row_count(self, schema_name, tbl_name):
         if self.db_type == "MSSQL":
@@ -284,7 +289,6 @@ class DBConnection():
                                 FROM sys.partitions
                                 WHERE index_id IN (0, 1)
                                 And OBJECT_ID = OBJECT_ID('{schema_name}.{tbl_name}');"""
-
         elif self.db_type == "postgresql":
             row_query = f"""SELECT reltuples AS row_count
                                 FROM pg_class
@@ -295,8 +299,17 @@ class DBConnection():
         row_count = cursor.fetchone()[0]
         return row_count
 
-    def create_query_drop_v3(self, schema_name, bandit_arm_list,
-                             arm_list_to_add, arm_list_to_delete, queries):
+    def transform_hypopg_index_usage(self, non_clustered_index_usage, bandit_arm_list_copy):
+        for i in range(len(non_clustered_index_usage)):
+            usage_tuple = non_clustered_index_usage[i]
+            usage_list = list(usage_tuple)
+            hypo_idx_name = usage_tuple[0]
+            new_idx_name = transform_hypopg_index_name(hypo_idx_name, bandit_arm_list_copy)
+            usage_list[0] = new_idx_name
+            non_clustered_index_usage[i] = tuple(usage_list)
+
+    def create_query_drop_v3(self, schema_name, bandit_arm_list: List[BanditArm],
+                             arm_list_to_add, arm_list_to_delete, queries: List[Query]):
         """
         This method aggregate few functions of the sql helper class.
             1. This method create the indexes related to the given bandit arms;
@@ -313,92 +326,68 @@ class DBConnection():
         :return:
         """
         self.bulk_drop_index(schema_name, arm_list_to_delete)
-        creation_cost = self.bulk_create_indexes(schema_name, arm_list_to_add)
-        execute_cost = 0
+        idx_creation_cost_dict = self.bulk_create_indexes(schema_name, arm_list_to_add)
+
+        w_execute_cost = 0
         # dict indexed by index name and map to a tuple indicating benefit and creation cost of the index
-        arm_rewards: Dict[str, Tuple[float, float]] = {}
+        arm_reward_dict: Dict[str, Tuple[float, float]] = {}
         for query in queries:
-            time, non_clustered_index_usage, clustered_index_usage = self.execute_query_v1(query.query_string)
-            # update non_clustered_index_usage for adjusting index name
-            # for hypo_idx_name from hypopg
+            q_cost, non_clustered_index_usage, clustered_index_usage, table_scans = self.execute_query_v1(query.query_string)
+            # query_text = format_query_string(query.query_string)
+            logging.info(f"Query {query.id} cost: {q_cost}")
+            w_execute_cost += q_cost
+
+            # update non_clustered_index_usage for adjusting index name for hypo_idx_name from hypopg
             bandit_arm_list_copy = bandit_arm_list
             bandit_arm_list_copy.update(arm_list_to_add)
-            for i in range(len(non_clustered_index_usage)):
-                usage_tuple = non_clustered_index_usage[i]
-                usage_list = list(usage_tuple)
-                hypo_idx_name = usage_tuple[0]
-                new_idx_name = self.transform_hypopg_index_name(hypo_idx_name, bandit_arm_list_copy)
-                usage_list[0] = new_idx_name
-                non_clustered_index_usage[i] = tuple(usage_list)
+            self.transform_hypopg_index_usage(non_clustered_index_usage, bandit_arm_list_copy)
 
             non_clustered_index_usage = merge_index_use(non_clustered_index_usage)
             clustered_index_usage = merge_index_use(clustered_index_usage)
-            logging.info(f"Query {query.id} cost: {time}")
-            execute_cost += time
 
+            for tscan in table_scans:
+                tbl_name = tscan[0]
+                cost = tscan[constants.COST_TYPE_CURRENT_EXECUTION]
+                self.conn_table_scan_time_dict[tbl_name].append(cost)
             # update table_scan_times dict for the query instance and db connection instance from index usages
-            current_clustered_index_scan_costs = {}
-            if clustered_index_usage:
-                for index_scan_info in clustered_index_usage:
-                    table_name = index_scan_info[0]
-                    if self.db_type == 'MSSQL':
-                        table_name = table_name.upper()
-                    current_clustered_index_scan_costs[table_name] = index_scan_info[constants.COST_TYPE_CURRENT_EXECUTION]
-                    if len(query.table_scan_times[table_name]) < constants.TABLE_SCAN_TIME_LENGTH:
-                        query.table_scan_times[table_name].append(index_scan_info[constants.COST_TYPE_CURRENT_EXECUTION])
-                        self.table_scan_times[table_name].append(index_scan_info[constants.COST_TYPE_CURRENT_EXECUTION])
+            # for index_scan_info in clustered_index_usage:  # fill current_clustered_index_scan_costs
+            #     idx_name = index_scan_info[0]
+            #     table_name = idx_name.split('_')[0]
+            #     cidx_scan_cost = index_scan_info[constants.COST_TYPE_CURRENT_EXECUTION]
+            #     self.conn_cluster_idx_scan_time_dict[table_name].append(cidx_scan_cost)
 
-            if non_clustered_index_usage:
-                idx_acccess_table_counts = {}
-                for index_use in non_clustered_index_usage:  # for each non_clustered_index usage
-                    index_name = index_use[0]
-                    table_name = bandit_arm_list[index_name].table_name
+            nc_idx_acccess_table_counts = {}
+            for index_use in non_clustered_index_usage:  # for each non_clustered_index usage
+                index_name = index_use[0]
+                table_name = bandit_arm_list[index_name].table_name
 
-                    if table_name in idx_acccess_table_counts:
-                        idx_acccess_table_counts[table_name] += 1
-                    else:
-                        idx_acccess_table_counts[table_name] = 1
+                idx_creation_cost = idx_creation_cost_dict[index_name]
+                idx_scan_cost = index_use[constants.COST_TYPE_CURRENT_EXECUTION]
+                self.conn_noncluster_idx_scan_time_dict[table_name].append(idx_scan_cost)
 
-                    if len(query.table_scan_times[table_name]) < constants.TABLE_SCAN_TIME_LENGTH:
-                        query.index_scan_times[table_name].append(index_use[constants.COST_TYPE_CURRENT_EXECUTION])
+                if table_name in nc_idx_acccess_table_counts:
+                    nc_idx_acccess_table_counts[table_name] += 1
+                else:
+                    nc_idx_acccess_table_counts[table_name] = 1
 
-                    table_scan_time = query.table_scan_times[table_name]
-                    # compute reward
-                    if len(table_scan_time) > 0 or len(self.table_scan_times[table_name]) > 0:
-                        if len(table_scan_time) > 0:
-                            temp_reward = max(table_scan_time) - index_use[constants.COST_TYPE_CURRENT_EXECUTION]
-                            temp_reward = temp_reward / idx_acccess_table_counts[table_name]
-                        elif len(self.table_scan_times[table_name]) > 0:
-                            temp_reward = max(self.table_scan_times[table_name]) - index_use[constants.COST_TYPE_CURRENT_EXECUTION]
-                            temp_reward = temp_reward / idx_acccess_table_counts[table_name]
-                        # else:
-                        #     logging.error(f"Queries without index scan information {query.id}")
-                        #     raise Exception
+                # compute reward
+                if len(self.conn_table_scan_time_dict[table_name]) > 0:
+                    # assert len(self.conn_table_scan_time_dict[table_name]) == 1
+                    tbl_scan_cost = max(self.conn_table_scan_time_dict[table_name])
+                else:
+                    tbl_scan_cost = max(self.conn_noncluster_idx_scan_time_dict[table_name])
+                gain_q_i = tbl_scan_cost - idx_scan_cost
+                # rew = gain_q_i - idx_creation_cost_dict[index_name]
+                if index_name not in arm_reward_dict:  # if first time
+                    arm_reward_dict[index_name] = [gain_q_i, idx_creation_cost]
+                else:
+                    arm_reward_dict[index_name][0] += gain_q_i
+                    arm_reward_dict[index_name][1] -= idx_creation_cost
 
-                        if table_name in current_clustered_index_scan_costs:
-                            temp_reward -= current_clustered_index_scan_costs[table_name] / idx_acccess_table_counts[table_name]
+        logging.info(f"Index creation cost: {sum(idx_creation_cost_dict.values())}")
+        logging.info(f"Time taken to run the queries: {w_execute_cost} after the configuration change")
 
-                        if index_name not in arm_rewards:
-                            arm_rewards[index_name] = [temp_reward, 0]
-                        else:
-                            arm_rewards[index_name][0] += temp_reward
-                    else:
-                        for index_name, bandit_arm in arm_list_to_add.items():
-                            if index_name not in arm_rewards:
-                                arm_rewards[index_name] = [0.0, 0]
-                            else:
-                                arm_rewards[index_name][0] += 0.0
-
-        # update the arm reward dict with the index creation cost for each arm
-        for key in creation_cost:
-            if key in arm_rewards:
-                arm_rewards[key][1] += -1 * creation_cost[key]
-            else:
-                arm_rewards[key] = [0, -1 * creation_cost[key]]
-        logging.info(f"Index creation cost: {sum(creation_cost.values())}")
-        logging.info(f"Time taken to run the queries: {execute_cost}")
-
-        return execute_cost, creation_cost, arm_rewards
+        return w_execute_cost, idx_creation_cost_dict, arm_reward_dict
 
     def hyp_create_index_v1(self, schema_name, tbl_name, col_names,
                             idx_name, include_cols=()):
@@ -499,9 +488,9 @@ class DBConnection():
             cursor.execute(query)
             stat_xml = cursor.fetchone()[0]
             cursor.execute("SET AUTOPILOT OFF")
-            query_plan = QueryPlan(stat_xml)
+            query_plan = QueryPlan_MSSQL(stat_xml)
             return float(
-                query_plan.est_statement_sub_tree_cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
+                query_plan.est_statement_cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
         elif db_type == "postgresql":
             cursor = self.connection.cursor()
             cursor.execute(f"EXPLAIN (FORMAT JSON) {query}")
@@ -710,7 +699,7 @@ class DBConnection():
 
         return columns, count
 
-    def get_current_pds_size(self):
+    def get_current_pds_size(self, hypo=True):
         """
         Get the current size of all the physical design structures.
 
@@ -728,14 +717,23 @@ class DBConnection():
 
         elif self.db_type == "postgresql":
             # query = "SELECT COALESCE(SUM(pg_relation_size(indexrelid)/1024/1024), 0) AS total_size FROM pg_index JOIN pg_class ON pg_index.indexrelid = pg_class.oid WHERE pg_class.relkind = 'i' AND relname LIKE '%_pkey';"
-            query = "select COALESCE(sum(pg_relation_size(indexrelid))/1024/1024, 0) AS total_index_size FROM pg_index JOIN pg_class ON pg_class.oid = pg_index.indexrelid JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace WHERE pg_namespace.nspname = 'public';"
-
-            cursor = self.connection.cursor()
-            try:
+            if not hypo:
+                query = "select COALESCE(sum(pg_relation_size(indexrelid))/1024/1024, 0) AS total_index_size FROM pg_index JOIN pg_class ON pg_class.oid = pg_index.indexrelid JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace WHERE pg_namespace.nspname = 'public';"
+                cursor = self.connection.cursor()
+                try:
+                    cursor.execute(query)
+                except psycopg2.OperationalError:
+                    print(f"error executing query {query}")
+                return cursor.fetchone()[0]
+            else:
+                query = "select COALESCE(sum(hypopg_relation_size(indexrelid))/1024/1024, 0) from hypopg_list_indexes;"
+                cursor = self.connection.cursor()
                 cursor.execute(query)
-            except psycopg2.OperationalError:
-                print(f"error executing query {query}")
-            return cursor.fetchone()[0]
+                res = cursor.fetchall()
+                idx_size_list = [i[0] for i in res]
+                size = sum(idx_size_list)
+                # print('debug line')
+                return size
 
     def get_primary_key(self, schema_name, table_name):
         """
@@ -799,7 +797,7 @@ class DBConnection():
         else:
             return column_data_length
 
-    def get_columns(self, table_name):
+    def get_table_columns(self, table_name):
         """
         Get all the columns in the given table.
 
@@ -879,11 +877,14 @@ class DBConnection():
             table_name = result[0].upper()
             row_count = self.get_table_row_count(constants.SCHEMA_NAME, table_name)
             pk_columns = self.get_primary_key(constants.SCHEMA_NAME, table_name)
-            tables[table_name] = Table(table_name, row_count, pk_columns)
-            tables[table_name].set_columns(self.get_columns(table_name))
+
+            tbl = Table(table_name, row_count, pk_columns)
+            tables[table_name] = tbl
+            tbl.size = self.get_table_size(table_name)
+            tbl.set_columns(self.get_table_columns(table_name))
         return tables
 
-    def get_estimated_size_of_index_v1(self, schema_name, tbl_name, col_names, db_type="postgresql"):
+    def get_estimated_size_of_index_v1(self, schema_name, tbl_name, col_names):
         """
         This helper method can be used to get a estimate size for a index.
         This simply multiply the column sizes with a estimated row count (need to improve further).
@@ -894,8 +895,7 @@ class DBConnection():
         :param col_names: string list of column names
         :return: estimated size in MB
         """
-
-        if db_type == "MSSQL":
+        if self.db_type == "MSSQL":
             # (0801): newly added.
             table = self.tables_global[tbl_name.lower()]
             header_size = 6
@@ -913,7 +913,7 @@ class DBConnection():
                 print(f"Index going past 1700: {col_names}")
                 estimated_size = 99999999
             logging.debug(f"{col_names} : {estimated_size}")
-        elif db_type == "postgresql":
+        elif self.db_type == "postgresql":
             cursor = self.connection.cursor()
 
             query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})"
@@ -925,10 +925,12 @@ class DBConnection():
             query = f"""SELECT * FROM hypopg_relation_size({oid});"""
 
             cursor.execute(query)
-            estimated_size = cursor.fetchone()[0] / float(1000 * 1000)
+            estimated_size = cursor.fetchone()[0] / float(1024 * 1024)
 
             query = f"SELECT * FROM hypopg_drop_index({oid});"
             cursor.execute(query)
+        else:
+            raise NotImplementedError(f"get_estimated_size_of_index_v1() for {self.db_type} not implemented yet.")
 
         return estimated_size
 
@@ -988,13 +990,15 @@ class DBConnection():
 
         if query_plan_string != "":
             if db_type == "MSSQL":
-                query_plan = QueryPlan(query_plan_string)
+                query_plan = QueryPlan_MSSQL(query_plan_string)
             elif db_type == "postgresql":
                 if len(query_plan_string) == 1:
                     query_plan_string = query_plan_string[0]
                 else:
                     raise
-                query_plan = QueryPlanPG(query_plan_string)
+                query_plan = QueryPlanPG(query_plan_string, self)
+            else:
+                raise NotImplementedError(f"get_selectivity_v3() for {self.db_type} not implemented yet")
 
             tables = predicates.keys()
             for table in tables:
@@ -1042,7 +1046,7 @@ class DBConnection():
                     query_table_scan_times[table_name].append(index_scan[constants.COST_TYPE_CURRENT_EXECUTION])
         return query_table_scan_times
 
-    def get_table_scan_times_structure(self):
+    def get_table_scan_times_structure(self) -> Dict[str, list]:
         # query_table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES["TPCH"])
         # (0814): newly added.
         query_table_scan_times = dict()
@@ -1087,6 +1091,23 @@ class DBConnection():
 
         return bandit_arm
 
+    def get_table_size(self, tbl_name):
+        """return the table size in kilo byte"""
+        cursor = self.connection.cursor()
+        if self.db_type == 'postgresql':
+            get_tbl_size_query = f"select 1.0*pg_relation_size('{tbl_name}');"
+            cursor.execute(get_tbl_size_query)
+            res = cursor.fetchone()
+            return float(res[0])
+        elif self.db_type == 'MSSQL':
+            get_tbl_size_query = f"EXEC sp_spaceused '{tbl_name}';"
+            cursor.execute(get_tbl_size_query)
+            res = cursor.fetchone()
+            # the results is a 5-element tuple (index_name, rows, reserved, data, unused)
+            return float(res[3])
+        else:
+            raise NotImplementedError(f"get_table_size() for {self.db_type} not implemented yet")
+
     def get_database_size(self):
         if self.db_type == "MSSQL":
             database_size = 10240
@@ -1130,19 +1151,6 @@ class DBConnection():
         else:
             raise "unkown db type"
 
-    @staticmethod
-    def transform_hypopg_index_name(hypo_idx_name, arms):
-        if '<' in hypo_idx_name:
-            _split_list = hypo_idx_name.split('>')[1].split('_')[1:]  # e.g., ['lineitem', 'l', 'orderkey', 'l', 'shipmode', 'l', 'receiptdate', 'l', 'shipdate']
-            tbl_name = _split_list[0].upper()
-            tabled_idx_name = tbl_name + '_' + '_'.join(_split_list[1:])
-        for arm in arms:
-            arm_tabled_idx_name = '_'.join(arm.split('_')[1:])
-            if arm_tabled_idx_name == tabled_idx_name:
-                return arm
-        """btree_lineitem_l_shipmode_l_partkey_l_quantity_l_shipinstruct_l_disco"""
-        raise ValueError(f"no bandits with name similar to {hypo_idx_name}")
-
     def restart_db(self):
         if self.db_type == 'MSSQL':
             command1 = "net stop mssqlserver"
@@ -1181,6 +1189,19 @@ class DBConnection():
         return selectivity_list
 
 
+def transform_hypopg_index_name(hypo_idx_name, arms):
+    if '<' in hypo_idx_name:
+        _split_list = hypo_idx_name.split('>')[1].split('_')[1:]  # e.g., ['lineitem', 'l', 'orderkey', 'l', 'shipmode', 'l', 'receiptdate', 'l', 'shipdate']
+        tbl_name = _split_list[0].upper()
+        tabled_idx_name = tbl_name + '_' + '_'.join(_split_list[1:])
+    for arm in arms:
+        arm_tabled_idx_name = '_'.join(arm.split('_')[1:])
+        if arm_tabled_idx_name == tabled_idx_name:
+            return arm
+    """btree_lineitem_l_shipmode_l_partkey_l_quantity_l_shipinstruct_l_disco"""
+    raise ValueError(f"no bandits with name similar to {hypo_idx_name}")
+
+
 def merge_index_use(index_uses):
     d = defaultdict(list)
     for index_use in index_uses:
@@ -1188,3 +1209,8 @@ def merge_index_use(index_uses):
             d[index_use[0]] = [0] * (len(index_use) - 1)
         d[index_use[0]] = [sum(x) for x in zip(d[index_use[0]], index_use[1:])]
     return [tuple([x] + y) for x, y in d.items()]
+
+
+def format_query_string(query_string):
+    query_text = query_string.replace('\r\n\t', ' ').replace('\r\n', ' ')
+    return query_text

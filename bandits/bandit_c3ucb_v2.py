@@ -29,6 +29,9 @@ class C3UCBBaseBandit:
 
 
 class C3UCB(C3UCBBaseBandit):
+    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle):
+        super().__init__(context_size, hyper_alpha, hyper_lambda, oracle)
+
     def select_arm(self, context_vectors, current_round):
         pass
 

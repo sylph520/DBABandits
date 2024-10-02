@@ -1,6 +1,9 @@
+from typing import Dict
+
+
 class Query:
     def __init__(self, connection, query_id: int, query_string: str,
-                 predicates: dict, payloads: dict, time_stamp=0,
+                 predicates: Dict[str, dict], payloads: Dict[str, dict], time_stamp=0,
                  sel_store=None):
         """
         initialize a query instance with its selectivity computed
@@ -18,8 +21,9 @@ class Query:
         self.frequency = 1
         self.last_seen_round = time_stamp
         self.first_seen_round = time_stamp
-        self.table_scan_times = connection.get_table_scan_times_structure()
-        self.index_scan_times = connection.get_table_scan_times_structure()
+        self.table_scan_time_dict = connection.get_table_scan_times_structure()
+        self.clustered_index_scan_time_dict = connection.get_table_scan_times_structure()
+        self.nonclustered_index_scan_time_dict = connection.get_table_scan_times_structure()
         self.table_scan_times_hyp = connection.get_table_scan_times_structure()
         self.index_scan_times_hyp = connection.get_table_scan_times_structure()
         self.context = None

@@ -8,7 +8,7 @@ import pandas as pd
 
 import constants
 from bandits.experiment_report import ExpReport
-# from database.config_test_run import ConfigRunner
+from database.config_test_run import ConfigRunner
 # from database.dta_test_run_v2 import DTARunner
 
 from shared.configs_v2 import get_exp_config
@@ -38,6 +38,12 @@ if __name__ == "__main__":
         exp_id = exp_id_list[i]
         local_exp_config = get_exp_config(exp_id=exp_id)
         database = local_exp_config.database
+        conf_dict = {
+            "db_conf": {
+                "db_type": db_type,
+                "database": database},
+            "exp_conf": local_exp_config
+        }
         # Comparing components
         OPTIMAL = constants.COMPONENT_OPTIMAL in local_exp_config.components
         TA_OPTIMAL = constants.COMPONENT_TA_OPTIMAL in local_exp_config.components
@@ -75,13 +81,6 @@ if __name__ == "__main__":
                                                local_exp_config.reps, local_exp_config.rounds)
 
                     for r in range(local_exp_config.reps):
-                        conf_dict = {
-                            "db_conf": {
-                                "db_type": db_type,
-                                "database": database},
-                            "exp_conf": local_exp_config
-                        }
-
                         simulator = simulator_class(conf_dict)
                         results, total_workload_time = simulator.run()
 
@@ -95,20 +94,19 @@ if __name__ == "__main__":
                         exp_report_mab.add_data_list(temp)
                     exp_report_list.append(exp_report_mab)
 
-    #         # Running No Index
-    #         if NO_INDEX:
-    #             exp_report_no_index = ExpReport(local_exp_config.experiment_id, constants.COMPONENT_NO_INDEX + exp_id_list[i], local_exp_config.reps,
-    #                                             local_exp_config.rounds)
-    #             for r in range(local_exp_config.reps):
-    #                 results, total_workload_time = ConfigRunner.run(
-    #                     "no_index.sql", uniform=UNIFORM)
-    #                 temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
-    #                                                    constants.DF_COL_MEASURE_VALUE])
-    #                 temp.append(
-    #                     [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
-    #                 temp[constants.DF_COL_REP] = r
-    #                 exp_report_no_index.add_data_list(temp)
-    #             exp_report_list.append(exp_report_no_index)
+            # Running No Index
+            if NO_INDEX:
+                exp_report_no_index = ExpReport(local_exp_config.experiment_id, constants.COMPONENT_NO_INDEX + exp_id_list[i], local_exp_config.reps,
+                                                local_exp_config.rounds)
+                for r in range(local_exp_config.reps):
+                    results, total_workload_time = ConfigRunner.run(conf_dict, uniform=UNIFORM)
+                    temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
+                                                       constants.DF_COL_MEASURE_VALUE])
+                    temp.append(
+                        [-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+                    temp[constants.DF_COL_REP] = r
+                    exp_report_no_index.add_data_list(temp)
+                exp_report_list.append(exp_report_no_index)
     #
     #         # Running Optimal
     #         if OPTIMAL:

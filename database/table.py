@@ -4,6 +4,7 @@ class Table:
         self.table_row_count = table_row_count
         self.pk_columns = pk_columns
         self.columns = None
+        self.size = 0.0
 
     def set_columns(self, columns):
         self.columns = columns
@@ -13,4 +14,3 @@ class Table:
             raise Exception('Columns are not set')
 
         return self.columns
-

@@ -76,7 +76,7 @@ class Simulator(BaseSimulator):
                     if query_obj_in_store.first_seen == -1:
                         query_obj_in_store.first_seen = t
                 else:
-                    query = Query(self.connection, query_id, query['query_string'], query['predicates'],
+                    query = Query(self.dbconn, query_id, query['query_string'], query['predicates'],
                                   query['payload'], t)
                     query.context = bandit_helper.get_query_context_v1(query, self.all_columns, self.number_of_columns)
                     self.query_obj_store[query_id] = query
@@ -105,7 +105,7 @@ class Simulator(BaseSimulator):
             # Get the predicates for queries and Generate index arms for each query
             index_arms = {}
             for i in range(len(query_obj_list_past)):
-                bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.connection, query_obj_list_past[i])
+                bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.dbconn, query_obj_list_past[i])
                 for key, index_arm in bandit_arms_tmp.items():
                     if key not in index_arms:
                         index_arm.query_ids = set()
@@ -126,7 +126,7 @@ class Simulator(BaseSimulator):
                                                                                   self.number_of_columns,
                                                                                   constants.CONTEXT_UNIQUENESS,
                                                                                   constants.CONTEXT_INCLUDES)
-            context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v2(self.connection, index_arms,
+            context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v2(self.dbconn, index_arms,
                                                                                     query_obj_list_past,
                                                                                     chosen_arms_last_round,
                                                                                     not constants.CONTEXT_INCLUDES)
@@ -160,7 +160,7 @@ class Simulator(BaseSimulator):
 
             # clean everything at start of actual rounds
             if self.exp_config.hyp_rounds != 0 and t == self.exp_config.hyp_rounds:
-                self.connection.bulk_drop_index(self.connection, constants.SCHEMA_NAME, chosen_arms_last_round)
+                self.dbconn.bulk_drop_index(self.dbconn, constants.SCHEMA_NAME, chosen_arms_last_round)
                 chosen_arms_last_round = {}
 
             # finding the difference between last round and this round
@@ -182,11 +182,11 @@ class Simulator(BaseSimulator):
 
             start_time_create_query = datetime.datetime.now()
             if t < self.exp_config.hyp_rounds:
-                time_taken, creation_cost_dict, arm_rewards = self.connection.hyp_create_query_drop_v1(self.connection, constants.SCHEMA_NAME,
+                time_taken, creation_cost_dict, arm_rewards = self.dbconn.hyp_create_query_drop_v1(self.dbconn, constants.SCHEMA_NAME,
                                                                                                        chosen_arms, added_arms, deleted_arms,
                                                                                                        query_obj_list_current)
             else:
-                time_taken, creation_cost_dict, arm_rewards = self.connection.create_query_drop_v2(self.connection,
+                time_taken, creation_cost_dict, arm_rewards = self.dbconn.create_query_drop_v2(self.dbconn,
                                                                                                    constants.SCHEMA_NAME,
                                                                                                    chosen_arms, added_arms,
                                                                                                    deleted_arms,
@@ -214,7 +214,7 @@ class Simulator(BaseSimulator):
             chosen_arms_last_round = chosen_arms
 
             if t == (self.exp_config.rounds + self.exp_config.hyp_rounds - 1):
-                self.connection.bulk_drop_index(self.connection, constants.SCHEMA_NAME, chosen_arms)
+                self.dbconn.bulk_drop_index(self.dbconn, constants.SCHEMA_NAME, chosen_arms)
 
             round_end_time = datetime.datetime.now()
             # Adding information to the results array
