@@ -34,6 +34,7 @@ class DBConnection():
         self.db_conf_dict = db_conf_dict
         self.connection = self.get_sql_connection(db_conf_dict)
         self.db_type = self.get_connection_type(self.connection)
+        self.hypo_idx = db_conf_dict['hypo_idx']
         self.pk_columns_dict = {}
         self.tables_global = self.get_tables()
 
@@ -63,7 +64,7 @@ class DBConnection():
         return indexes
 
     def create_index_v1(self, schema_name, tbl_name, col_names,
-                        idx_name, include_cols=(), hypo=True):
+                        idx_name, include_cols=()):
         """
         Create an index on the given table.
         :param connection: sql_connection
@@ -98,25 +99,35 @@ class DBConnection():
             else:
                 return float(query_plan.est_statement_cost)
         elif self.db_type == "postgresql":
-            if hypo:
+            if self.hypo_idx:
                 if include_cols:
-                    query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})" \
+                    idx_query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})" \
                             f" INCLUDE ({', '.join(include_cols)})"
                 else:
-                    query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})"
+                    idx_query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})"
                 query = f"SELECT * FROM hypopg_create_index('{query}');"
-            cursor.execute(query)
-            res = cursor.fetchone()
-            self.connection.commit()
-            oid, hypo_idx_name = res
-
-            hypo_exp_qry = "explain (format json) " + query
-            cursor.execute(hypo_exp_qry)
-            res2 = cursor.fetchone()
-            self.connection.commit()
-            est_hypopg_idx_creation_cost = res2[0][0]["Plan"]['Total Cost']
-            logging.info(f"Added: {idx_name}")
-            return est_hypopg_idx_creation_cost, oid, hypo_idx_name
+                cursor.execute(query)
+                res = cursor.fetchone()
+                self.connection.commit()
+                oid, hypo_idx_name = res
+                hypo_exp_qry = "explain (format json) " + query
+                cursor.execute(hypo_exp_qry)
+                res2 = cursor.fetchone()
+                self.connection.commit()
+                est_hypopg_idx_creation_cost = res2[0][0]["Plan"]['Total Cost']
+                logging.info(f"Added: {idx_name}")
+                return est_hypopg_idx_creation_cost, oid, hypo_idx_name
+            else:
+                if include_cols:
+                   query = f"CREATE INDEX {idx_name} ON {tbl_name} ({', '.join(col_names)})" \
+                            f" INCLUDE ({', '.join(include_cols)})"
+                else:
+                    query = f"CREATE INDEX {idx_name} ON {tbl_name} ({', '.join(col_names)})"
+                idx_creation_start = time.time()
+                cursor.execute(query)
+                idx_creation_end = time.time()
+                index_creation_time = idx_creation_end - idx_creation_start
+                return index_creation_time, -1, ''
         else:
             raise NotImplementedError
 
@@ -203,7 +214,10 @@ class DBConnection():
         if db_type == "MSSQL":
             query = f"DROP INDEX {schema_name}.{tbl_name}.{idx_name}"
         elif db_type == "postgresql":
-            query = f"SELECT * FROM hypopg_drop_index({oid})"
+            if self.hypo_idx:
+                query = f"SELECT * FROM hypopg_drop_index({oid})"
+            else:
+                query = f"drop index {idx_name};"
 
         cursor = self.connection.cursor()
         cursor.execute(query)
@@ -220,7 +234,7 @@ class DBConnection():
         :param bandit_arm_list: list of bandit arms
         :return:
         """
-        for index_name, bandit_arm in bandit_arm_list.items():
+        for _, bandit_arm in bandit_arm_list.items():
             self.drop_index(schema_name, bandit_arm)
 
     def simple_execute(self, query):
@@ -260,7 +274,10 @@ class DBConnection():
                 query_plan = QueryPlan_MSSQL(stat_xml)
             elif self.db_type == "postgresql":
                 query = self.fix_tsql_to_psql(query)
-                cursor.execute(f"EXPLAIN (FORMAT JSON) {query}")
+                if self.hypo_idx:
+                    cursor.execute(f"EXPLAIN (FORMAT JSON) {query}")
+                else:
+                    cursor.execute(f"EXPLAIN (FORMAT JSON, ANALYZE) {query}")
                 stat_xml = cursor.fetchone()[0][0]
                 query_plan = QueryPlanPG(stat_xml, self)
                 cost_type_current_execution = constants.COST_TYPE_SUB_TREE_COST
@@ -337,10 +354,11 @@ class DBConnection():
             logging.info(f"Query {query.id} cost: {q_cost}")
             w_execute_cost += q_cost
 
-            # update non_clustered_index_usage for adjusting index name for hypo_idx_name from hypopg
-            bandit_arm_list_copy = bandit_arm_list
-            bandit_arm_list_copy.update(arm_list_to_add)
-            self.transform_hypopg_index_usage(non_clustered_index_usage, bandit_arm_list_copy)
+            if self.hypo_idx:
+                # update non_clustered_index_usage for adjusting index name for hypo_idx_name from hypopg
+                bandit_arm_list_copy = bandit_arm_list
+                bandit_arm_list_copy.update(arm_list_to_add)
+                self.transform_hypopg_index_usage(non_clustered_index_usage, bandit_arm_list_copy)
 
             non_clustered_index_usage = merge_index_use(non_clustered_index_usage)
             clustered_index_usage = merge_index_use(clustered_index_usage)
@@ -961,14 +979,17 @@ class DBConnection():
         elif self.db_type == "postgresql":
             cursor = self.connection.cursor()
             query2 = self.fix_tsql_to_psql(query)
-            cursor.execute(f"EXPLAIN (FORMAT JSON) {query2}")
+            if self.hypo_idx:
+                cursor.execute(f"EXPLAIN (FORMAT JSON) {query2}")
+            else:
+                cursor.execute(f"EXPLAIN (FORMAT JSON, ANALYZE) {query2}")
             query_plan = cursor.fetchone()[0]
         else:
             raise NotImplementedError
 
         return query_plan
 
-    def get_selectivity_v3(self, query, predicates):
+    def get_selectivity_v3(self, query_str: str, predicates):
         """
         Return the selectivity of the given query.
 
@@ -978,9 +999,8 @@ class DBConnection():
         :param db_type:
         :return: Predicates list
         """
-        query_plan_string = self.get_query_plan(query)
+        query_plan_string = self.get_query_plan(query_str)
         read_rows = {}
-        selectivity = {}
 
         db_type = self.db_type
         # plan_load = "/data/wz/index/data_resource/query_plan.xml"
@@ -1001,24 +1021,49 @@ class DBConnection():
                 raise NotImplementedError(f"get_selectivity_v3() for {self.db_type} not implemented yet")
 
             tables = predicates.keys()
-            for table in tables:
-                read_rows[table] = 1000000000
+            # for table in tables:
+            #     read_rows[table] = 1000000000
+            #
+            # for index_scan in query_plan.clustered_index_usage:
+            #     if index_scan[0] not in read_rows:
+            #         read_rows[index_scan[0]] = 1000000000
+            #     read_rows[index_scan[0]] = min(float(index_scan[5]), read_rows[index_scan[0]])
 
-            for index_scan in query_plan.clustered_index_usage:
-                if index_scan[0] not in read_rows:
-                    read_rows[index_scan[0]] = 1000000000
-                read_rows[index_scan[0]] = min(float(index_scan[5]), read_rows[index_scan[0]])
+            # e.g., {'LINEITEM': {'L_SHIPDATE': 'r'}}
 
-            for table in tables:
-                # (1018): newly added.
-                if self.get_table_row_count("dbo", table) == 0:
-                    selectivity[table] = 1
-                else:
-                    selectivity[table] = read_rows[table] / self.get_table_row_count("dbo", table)
+            if len(query_plan.clustered_index_usage) == 0\
+                and len(query_plan.non_clustered_index_usage) == 0:
+                query_table_selectivity = {t: 0.0 for t in tables}
+            else:
+                c_sel_list_dict = self.get_sel_list_dict_from_index_usage(query_plan.clustered_index_usage)
+                nc_sel_list_dict = self.get_sel_list_dict_from_index_usage(query_plan.non_clustered_index_usage)
+                sel_list_dict = {}
+                if len(c_sel_list_dict) > 0:
+                    sel_list_dict = c_sel_list_dict.copy()
+                    for t in c_sel_list_dict:
+                        if t in nc_sel_list_dict:
+                            c_sel_list_dict[t].extend(nc_sel_list_dict[t])
 
-            return selectivity
+                query_table_selectivity = {k: 1.0*sum(v)/len(v) for k, v in sel_list_dict.items()}
+            return query_table_selectivity
         else:
             return 1
+
+    def get_sel_list_dict_from_index_usage(self, index_usage_list):
+        sel_list_dict: Dict[str, List[float]] = {}
+        if len(index_usage_list) > 0:
+            for usage in index_usage_list:
+                idx_name = usage[0]
+                tbl_name = idx_name.split('_')[0]
+                rows_out = usage[-1]
+                rows_in = usage[-2]
+                sel = 1.0 * rows_out / rows_in
+                if tbl_name in sel_list_dict:
+                    sel_list_dict[tbl_name].append(sel)
+                else:
+                    sel_list_dict[tbl_name] = [sel]
+        return sel_list_dict
+
 
     def remove_all_non_clustered(self, schema_name):
         """
@@ -1071,8 +1116,8 @@ class DBConnection():
         cursor.execute(query)
         cursor.commit()
 
-    def set_arm_size(self, bandit_arm, db_type="postgresql"):
-        if db_type == "MSSQL":
+    def set_arm_size(self, bandit_arm):
+        if self.db_type == "MSSQL":
             query = f"""SELECT (SUM(s.[used_page_count]) * 8)/1024 AS IndexSizeMB
                         FROM sys.dm_db_partition_stats AS s
                         INNER JOIN sys.indexes AS i ON s.[object_id] = i.[object_id]
@@ -1081,8 +1126,13 @@ class DBConnection():
                         GROUP BY i.[name]
                         ORDER BY i.[name]
                     """
-        elif db_type == "postgresql":
-            query = f"""SELECT * FROM hypopg_relation_size({bandit_arm.oid})"""
+        elif self.db_type == "postgresql":
+            if self.hypo_idx:
+                query = f"""SELECT * FROM hypopg_relation_size({bandit_arm.oid})"""
+            else:
+                query = f"select pg_relation_size('{bandit_arm.index_name}')"
+        else:
+            raise NotImplementedError(f"set_arm_size() for {self.db_type} is not implemented.")
 
         cursor = self.connection.cursor()
         cursor.execute(query)

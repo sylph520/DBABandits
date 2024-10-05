@@ -93,8 +93,8 @@ class QueryPlanPG:
         self.est_num_res_rows = plan_json["Plan"]["Plan Rows"]
         self.est_stmt_cost = plan_json["Plan"]["Total Cost"]
 
-        if "Actual Total Time" in plan_json.keys():  # explain analyze
-            self.stmt_elapsed_time = float(plan_json["Plan"]["Actual Total Time"]) / 1000
+        if "Execution time" in plan_json.keys():  # explain analyze
+            self.stmt_elapsed_time = float(plan_json["Execution time"]) / 1000
         else:
             self.stmt_elapsed_time = 0.0
 

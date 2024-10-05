@@ -20,6 +20,7 @@ PG_CPU_TUPLE_COST = 0.01
 PG_CPU_OPERATOR_COST = 0.0025
 PG_CPU_INDEX_TUPLE_COST = 0.005
 PG_RANDOM_PAGE_COST = 4
+HYPO_INDEX = True
 
 # ===============================  Arm Generation Heuristics  ===============================
 INDEX_INCLUDES = 1

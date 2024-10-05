@@ -6,6 +6,7 @@ from collections import namedtuple
 
 ExpConf = namedtuple('ExpConf', [
     'experiment_id',
+    'hypo_idx',
     'database',
     'reps',
     'rounds', 'hyp_rounds',
@@ -28,6 +29,7 @@ def get_exp_config(exp_id=''):
         experiment_id = exp_config['general']['run_experiment']
     exp_conf_nt = ExpConf(
         experiment_id=experiment_id,
+        hypo_idx=exp_config['general']['hypo_idx'],
         database=exp_config[experiment_id]['database'],
         # information about experiment
         reps=int(exp_config[experiment_id]['reps']),

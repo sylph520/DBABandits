@@ -289,11 +289,13 @@ if __name__ == "__main__":
     if SEPARATE_EXPERIMENTS:
         exp_report_list = []
     local_exp_config = get_exp_config(exp_id=exp_id)
+    hypo_idx = True if local_exp_config.hypo_idx in ['true', 'True'] else False
     database_name = local_exp_config.database
     conf_dict = {
         "db_conf": {
             "db_type": db_type,
-            "database": database_name},
+            "database": database_name,
+            "hypo_idx": hypo_idx},
         "exp_conf": local_exp_config
     }
     experiment_folder_path = helper.get_experiment_folder_path(exp_id)

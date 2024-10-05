@@ -1,8 +1,11 @@
-from typing import Dict
+from __future__ import annotations
+from typing import Dict, TYPE_CHECKING
+if TYPE_CHECKING:
+    from database.dbconn import DBConnection
 
 
 class Query:
-    def __init__(self, connection, query_id: int, query_string: str,
+    def __init__(self, connection: DBConnection, query_id: int, query_string: str,
                  predicates: Dict[str, dict], payloads: Dict[str, dict], time_stamp=0,
                  sel_store=None):
         """
@@ -13,6 +16,8 @@ class Query:
         self.payload = payloads
         self.group_by = {}
         self.order_by = {}
+        # selectivity_list: query-wise
+        # selectivity: table-wise, {table: float_val}
         if sel_store is not None and query_string in sel_store:
             self.selectivity = sel_store[query_string]
         else:
