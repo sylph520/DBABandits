@@ -1,5 +1,6 @@
 import operator
 from abc import abstractmethod
+from typing import List
 
 import numpy
 
@@ -143,7 +144,7 @@ class OracleV7(BaseOracle):
 
     def get_super_arm(self, upper_bounds, context_vectors, bandit_arms):
         used_memory = 0
-        chosen_arms = []
+        chosen_arms :List[int] = []
         arm_ucb_dict = {}
         table_count = {}
 

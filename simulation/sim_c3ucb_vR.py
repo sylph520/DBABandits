@@ -102,10 +102,10 @@ class Simulator(BaseSimulator):
             # New set of queries in this batch, required for query execution
             queries_current_batch = self.queries[queries_start:queries_end]
 
-            # Adding new queries to the query store
+            # generate query instance, adding new queries to the query store,
+            # and query_obj_list_current
             query_obj_list_current = []
             for n in range(len(queries_current_batch)):
-                # for each query, transform and append to the query_obj_store
                 query = queries_current_batch[n]  # a dict of query info
                 query_id = query['id']
                 if query_id in self.query_obj_store:
@@ -149,6 +149,7 @@ class Simulator(BaseSimulator):
             index_arms: Dict[str, BanditArm] = {}
             for i in range(len(query_obj_list_past)):  # for each previously seen query
                 bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.connection, query_obj_list_past[i])
+                # update properties of all generated arms, generate dict to map
                 for key, index_arm in bandit_arms_tmp.items():
                     if key not in index_arms:
                         index_arm.query_ids = set()

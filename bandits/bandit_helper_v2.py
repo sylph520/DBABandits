@@ -19,7 +19,7 @@ def gen_arms_from_predicates_v2(connection, query_obj):
     :param query_obj: Query object
     :return: list of bandit arms
     """
-    bandit_arms: Dict[id, BanditArm] = {}
+    bandit_arms: Dict[str, BanditArm] = {}
     predicates = query_obj.predicates
     payloads = query_obj.payload
     query_id = query_obj.id

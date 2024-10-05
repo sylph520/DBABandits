@@ -1,18 +1,19 @@
 import xml.etree.ElementTree as ET
+from typing import List
 
 ns = {'sp': 'http://schemas.microsoft.com/sqlserver/2004/07/showplan'}
 physical_operations = {'Index Seek', 'Index Scan', "Clustered Index Scan", "Clustered Index Seek"}
 
 
 class QueryPlan:
-
     def __init__(self, xml_string):
         self.estimated_rows = 0
         self.est_statement_sub_tree_cost = 0
         self.elapsed_time = 0
         self.cpu_time = 0
-        self.non_clustered_index_usage = []
-        self.clustered_index_usage = []
+        self.non_clustered_index_usage: List[tuple] = []
+        self.clustered_index_usage: List[tuple] = []
+        self.table_scans: List[tuple] = []
 
         root = ET.fromstring(xml_string)
         stmt_simple = root.find('.//sp:StmtSimple', ns)
@@ -29,35 +30,48 @@ class QueryPlan:
         total_po_actual = 0
         # Get the sum of sub tree cost for physical operations (assumption: sub tree cost is dominated by the physical
         # operations)
-        for rel_op in rel_ops:
-            temp_act_elapsed_time = 0
-            if rel_op.attrib.get('PhysicalOp') in physical_operations:
-                total_po_sub_tree_cost += float(rel_op.attrib.get('EstimatedTotalSubtreeCost'))
-                runtime_thread_information = rel_op.findall('.//sp:RunTimeCountersPerThread', ns)
-                for thread_info in runtime_thread_information:
-                    temp_act_elapsed_time = max(
-                        int(thread_info.attrib.get('ActualElapsedms')) if thread_info.attrib.get(
-                            'ActualRowsRead') is not None else 0, temp_act_elapsed_time)
-                total_po_actual += temp_act_elapsed_time/1000
+        # for rel_op in rel_ops:
+        #     temp_act_elapsed_time = 0
+        #     if rel_op.attrib.get('PhysicalOp') in physical_operations:
+        #         total_po_sub_tree_cost += float(rel_op.attrib.get('EstimatedTotalSubtreeCost'))
+        #         runtime_thread_information = rel_op.findall('.//sp:RunTimeCountersPerThread', ns)
+        #         for thread_info in runtime_thread_information:
+        #             temp_act_elapsed_time = max(
+        #                 int(thread_info.attrib.get('ActualElapsedms')) if thread_info.attrib.get(
+        #                     'ActualRowsRead') is not None else 0, temp_act_elapsed_time)
+        #         total_po_actual += temp_act_elapsed_time/1000
 
         # Now for each rel operator we estimate the elapsed time using the sub tree costs
         for rel_op in rel_ops:
             rows_read = 0
             act_rel_op_elapsed_time = 0
-            if rel_op.attrib.get('PhysicalOp') in physical_operations:
+            # temp_act_elapsed_time = 0
+            if rel_op.attrib.get('PhysicalOp') in physical_operations or rel_op.attrib.get('PhysicalOp')=='Table Scan':
+                total_po_sub_tree_cost += float(rel_op.attrib.get('EstimatedTotalSubtreeCost'))
                 runtime_thread_information = rel_op.findall('.//sp:RunTimeCountersPerThread', ns)
                 for thread_info in runtime_thread_information:
                     rows_read += int(thread_info.attrib.get('ActualRowsRead')) if thread_info.attrib.get(
                         'ActualRowsRead') is not None else 0
                     act_rel_op_elapsed_time = max(int(thread_info.attrib.get('ActualElapsedms')) if thread_info.attrib.get(
                         'ActualElapsedms') is not None else 0, act_rel_op_elapsed_time)
+                    # temp_act_elapsed_time = max(
+                    #     int(thread_info.attrib.get('ActualElapsedms')) if thread_info.attrib.get(
+                    #         'ActualRowsRead') is not None else 0, temp_act_elapsed_time)
+                # total_po_actual += temp_act_elapsed_time/1000
+            # elif rel_op.attrib.get('PhysicalOp') in {'Table Scan'}:
+            #     est_rows_read = rel_op.attrib.get('EstimateRows')
+            #     est_cpu = rel_op.attrib.get('EstimateCPU')
+            #     est_IO = rel_op.attrib.get('EstiamteIO')
+            #     est_subtreecost = rel_op.attrib.get('EstimateTotalSubtreeCost')
+            else:
+                pass
             act_rel_op_elapsed_time = act_rel_op_elapsed_time/1000
             # act_rel_op_elapsed_time = float(self.elapsed_time) * (act_rel_op_elapsed_time/total_po_actual) if total_po_actual > 0 else 0
             # We can either use act_rel_op_elapsed_time or po_elapsed_time for the elapsed time
             if rows_read == 0:
                 rows_read = float(rel_op.attrib.get('EstimatedRowsRead')) if rel_op.attrib.get('EstimatedRowsRead') else 0
             rows_output = float(rel_op.attrib.get('EstimateRows'))
-            if rel_op.attrib.get('PhysicalOp') in physical_operations:
+            if rel_op.attrib.get('PhysicalOp') in physical_operations or rel_op.attrib.get('PhysicalOp')=='Table Scan':
                 po_subtree_cost = float(rel_op.attrib.get('EstimatedTotalSubtreeCost'))
                 po_elapsed_time = float(self.elapsed_time) * (po_subtree_cost / total_po_sub_tree_cost)
                 po_cpu_time = float(self.cpu_time) * (
@@ -71,3 +85,6 @@ class QueryPlan:
                     table = po_index_scan.find('.//sp:Object', ns).attrib.get('Table').strip("[]")
                     self.clustered_index_usage.append(
                         (table, act_rel_op_elapsed_time, po_cpu_time, po_subtree_cost, rows_read, rows_output))
+                elif rel_op.attrib.get('PhysicalOp') == 'Table Scan':
+                    table = rel_op.find('.//sp:Object', ns).attrib.get('Table').strip("[]")
+                    self.table_scans.append((table, act_rel_op_elapsed_time, po_cpu_time, po_subtree_cost, rows_read, rows_output))

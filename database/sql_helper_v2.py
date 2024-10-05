@@ -192,16 +192,17 @@ def execute_query_v1(connection, query):
         cursor.execute("SET STATISTICS XML OFF")
         query_plan = QueryPlan(stat_xml)
         if constants.COST_TYPE_CURRENT_EXECUTION == constants.COST_TYPE_ELAPSED_TIME:
-            return float(query_plan.elapsed_time), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
+            cost = query_plan.elapsed_time
         elif constants.COST_TYPE_CURRENT_EXECUTION == constants.COST_TYPE_CPU_TIME:
-            return float(query_plan.cpu_time), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
+            cost = query_plan.cpu_time
         elif constants.COST_TYPE_CURRENT_EXECUTION == constants.COST_TYPE_SUB_TREE_COST:
-            return float(query_plan.est_statement_sub_tree_cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
+            cost = query_plan.est_statement_sub_tree_cost
         else:
-            return float(query_plan.est_statement_sub_tree_cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage
+            cost = query_plan.est_statement_sub_tree_cost
+        return float(cost), query_plan.non_clustered_index_usage, query_plan.clustered_index_usage, query_plan.table_scans
     except:
         print("Exception when executing query: ", query)
-        return 0, [], []
+        return 0, [], [], []
 
 
 def get_table_row_count(connection, schema_name, tbl_name):
@@ -239,19 +240,24 @@ def create_query_drop_v3(connection, schema_name, bandit_arm_list, arm_list_to_a
     if tables_global is None:
         get_tables(connection)
     for query in queries:
-        time, non_clustered_index_usage, clustered_index_usage = execute_query_v1(connection, query.query_string)
+        time, non_clustered_index_usage, clustered_index_usage, q_table_scan_times = execute_query_v1(connection, query.query_string)
         non_clustered_index_usage = merge_index_use(non_clustered_index_usage)
         clustered_index_usage = merge_index_use(clustered_index_usage)
         logging.info(f"Query {query.id} cost: {time}")
         execute_cost += time
         current_clustered_index_scans = {}
+        if q_table_scan_times:
+            for tbl_scan_info in q_table_scan_times:
+                tbl_name = tbl_scan_info[0]
+                query.table_scan_times[tbl_name].append(tbl_scan_info[constants.COST_TYPE_CURRENT_CREATION])
+                table_scan_times[tbl_name].append(tbl_scan_info[constants.COST_TYPE_CURRENT_CREATION])
         if clustered_index_usage:
             for index_scan in clustered_index_usage:
                 table_name = index_scan[0]
                 current_clustered_index_scans[table_name] = index_scan[constants.COST_TYPE_CURRENT_EXECUTION]
-                if len(query.table_scan_times[table_name]) < constants.TABLE_SCAN_TIME_LENGTH:
-                    query.table_scan_times[table_name].append(index_scan[constants.COST_TYPE_CURRENT_EXECUTION])
-                    table_scan_times[table_name].append(index_scan[constants.COST_TYPE_CURRENT_EXECUTION])
+                # if len(query.table_scan_times[table_name]) < constants.TABLE_SCAN_TIME_LENGTH:
+                #     query.table_scan_times[table_name].append(index_scan[constants.COST_TYPE_CURRENT_EXECUTION])
+                #     table_scan_times[table_name].append(index_scan[constants.COST_TYPE_CURRENT_EXECUTION])
         if non_clustered_index_usage:
             table_counts = {}
             for index_use in non_clustered_index_usage:
@@ -269,12 +275,12 @@ def create_query_drop_v3(connection, schema_name, bandit_arm_list, arm_list_to_a
                 table_scan_time = query.table_scan_times[table_name]
                 if len(table_scan_time) > 0:
                     temp_reward = max(table_scan_time) - index_use[constants.COST_TYPE_CURRENT_EXECUTION]
-                    temp_reward = temp_reward/table_counts[table_name]
+                    temp_reward = temp_reward / table_counts[table_name]
                 elif len(table_scan_times[table_name]) > 0:
                     temp_reward = max(table_scan_times[table_name]) - index_use[constants.COST_TYPE_CURRENT_EXECUTION]
                     temp_reward = temp_reward / table_counts[table_name]
                 else:
-                    logging.error(f"Queries without index scan information {query.id}")
+                    print(f"Queries without index scan information {query.id}")
                     raise Exception
                 if table_name in current_clustered_index_scans:
                     temp_reward -= current_clustered_index_scans[table_name]/table_counts[table_name]
