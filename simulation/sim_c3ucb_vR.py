@@ -4,6 +4,7 @@ import operator
 import pprint
 import argparse
 import pickle
+from typing import List
 import numpy
 from pandas import DataFrame
 
@@ -22,7 +23,7 @@ class Simulator(BaseSimulator):
         super().__init__(kwargs)
 
     def get_round_query_obj_batch_and_update_query_store(self, queries_current_batch, t):
-        query_obj_list_current = []
+        query_obj_list_current: List[Query] = []
         for n in range(len(queries_current_batch)):  # Adding new queries to the query store
             # for each query, transform and append to the query_obj_store
             query = queries_current_batch[n]  # a dict of query info
@@ -100,7 +101,7 @@ class Simulator(BaseSimulator):
                     next_workload_shift += 1
 
             # New set of queries in this batch, required for query execution
-            queries_current_batch = self.queries[queries_start:queries_end]
+            queries_current_batch = self.query_jsons[queries_start:queries_end]
             query_obj_list_current = self.get_round_query_obj_batch_and_update_query_store(queries_current_batch, t)
 
             # This list contains all past queries, we don't include new queries seen for the first time.

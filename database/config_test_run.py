@@ -17,8 +17,8 @@ class ConfigRunner:
         queries_start = cr_exp_config.queries_start_list[next_workload_shift]
         queries_end = cr_exp_config.queries_end_list[next_workload_shift]
         next_config_shift = 0
-        queries = helper.get_queries_v2()
         connection = DBConnection(cr_db_config)
+        queries = helper.get_queries_v2(db_type=connection.db_type)
 
         # Query execution
         execution_cost = 0.0

@@ -32,8 +32,8 @@ class BaseSimulator:
         logging.getLogger().setLevel(logging.INFO)
 
         # Get the query List
-        self.queries = helper.get_queries_v2()
         self.connection = sql_connection.get_sql_connection()
+        self.queries = helper.get_queries_v2(db_type=sql_connection.DBConnection.get_connection_type(self.connection))
         self.query_obj_store = {}
         self.bandit_arms_store = {}
 

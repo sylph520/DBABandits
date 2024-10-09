@@ -136,7 +136,7 @@ def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False):
 # db related
 
 
-def get_queries_v2(workload_file) -> list:
+def get_queries_v2(workload_file, db_type='MSSQL') -> list:
     """
     Read all the queries in the queries pointed by the QUERY_DICT_FILE constant
     :return: list of queries
@@ -145,7 +145,9 @@ def get_queries_v2(workload_file) -> list:
     with open(constants.ROOT_DIR + workload_file) as f:
         line = f.readline()
         while line:
-            queries.append(json.loads(line))
+            line_json = json.loads(line)
+            if db_type != 'postgresql' or line_json['id'] not in [2, 17, 20]:
+                queries.append(line_json)
             line = f.readline()
     return queries
 

@@ -39,7 +39,7 @@ class BaseSimulator:
         # Reading the configuration for given experiment ID, and get the query List
         # experiment id for the current run
         workload_file = str(self.exp_config.workload_file)
-        self.queries = helper.get_queries_v2(workload_file)  # fetch query instances from files
+        self.query_jsons = helper.get_queries_v2(workload_file, self.db_type)  # fetch query instances from files
 
         self.query_obj_store: Dict[int, Query] = {}
         self.bandit_arms_store: Dict[str, BanditArm] = {}

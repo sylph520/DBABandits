@@ -117,11 +117,13 @@ class QueryPlanPG:
             if rel_op["Node Type"] == 'Seq Scan':
                 tbl_name = rel_op['Relation Name'].upper()
 
-                if tbl_name in num_row_prev:
-                    est_op_rows_read = num_row_prev[tbl_name]
-                else:
-                    est_op_rows_read = int(tables_global[tbl_name].table_row_count)
+                # if tbl_name in num_row_prev:
+                #     est_op_rows_read = num_row_prev[tbl_name]
+                # else:
+                #     est_op_rows_read = int(tables_global[tbl_name].table_row_count)
+                est_op_rows_read = int(tables_global[tbl_name].table_row_count)
                 est_op_rows_output = rel_op['Plan Rows']
+                assert est_op_rows_output <= est_op_rows_read
                 num_row_prev[tbl_name] = est_op_rows_output
 
                 est_op_subtree_cost = rel_op['Total Cost']

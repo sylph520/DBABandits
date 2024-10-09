@@ -35,7 +35,7 @@ class DTARunner:
         self.workload_file_last_run = constants.ROOT_DIR + constants.WORKLOADS_FOLDER + '\\temp_workload_last_run.sql'
         self.workload_type = workload_type
         self.ta_runs = ta_runs
-        self.queries = helper.get_queries_v2()
+        self.queries = helper.get_queries_v2(db_type=self.db_type)
         self.uniform = uniform
 
     def run(self):

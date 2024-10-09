@@ -61,7 +61,7 @@ class Simulator(BaseSimulator):
                     next_workload_shift += 1
 
             # New set of queries in this batch, required for query execution
-            queries_current_batch = self.queries[queries_start:queries_end]
+            queries_current_batch = self.query_jsons[queries_start:queries_end]
 
             # Adding new queries to the query store
             query_obj_list_current = []
