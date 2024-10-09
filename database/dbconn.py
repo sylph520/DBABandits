@@ -119,12 +119,13 @@ class DBConnection():
                 return est_hypopg_idx_creation_cost, oid, hypo_idx_name
             else:
                 if include_cols:
-                   query = f"CREATE INDEX {idx_name} ON {tbl_name} ({', '.join(col_names)})" \
+                    query = f"CREATE INDEX \"{idx_name}\" ON {tbl_name} ({', '.join(col_names)})" \
                             f" INCLUDE ({', '.join(include_cols)})"
                 else:
-                    query = f"CREATE INDEX {idx_name} ON {tbl_name} ({', '.join(col_names)})"
+                    query = f"CREATE INDEX \"{idx_name}\" ON {tbl_name} ({', '.join(col_names)})"
                 idx_creation_start = time.time()
                 cursor.execute(query)
+                self.connection.commit()
                 idx_creation_end = time.time()
                 index_creation_time = idx_creation_end - idx_creation_start
                 return index_creation_time, -1, ''
@@ -198,6 +199,8 @@ class DBConnection():
                 bandit_arm.oid = oid
                 bandit_arm.hypopg_idx_name = hypo_idx_name
                 self.set_arm_size(bandit_arm)
+            else:
+                raise
         return idx_creation_cost_dict
 
     def drop_index(self, schema_name, bandit_arm, db_type="postgresql"):
@@ -317,13 +320,15 @@ class DBConnection():
         return row_count
 
     def transform_hypopg_index_usage(self, non_clustered_index_usage, bandit_arm_list_copy):
+        non_clustered_index_usage_new = non_clustered_index_usage.copy()
         for i in range(len(non_clustered_index_usage)):
-            usage_tuple = non_clustered_index_usage[i]
+            usage_tuple = non_clustered_index_usage_new[i]
             usage_list = list(usage_tuple)
             hypo_idx_name = usage_tuple[0]
             new_idx_name = transform_hypopg_index_name(hypo_idx_name, bandit_arm_list_copy)
             usage_list[0] = new_idx_name
-            non_clustered_index_usage[i] = tuple(usage_list)
+            non_clustered_index_usage_new[i] = tuple(usage_list)
+        return non_clustered_index_usage_new
 
     def create_query_drop_v3(self, schema_name, bandit_arm_list: List[BanditArm],
                              arm_list_to_add, arm_list_to_delete, queries: List[Query]):
@@ -349,7 +354,7 @@ class DBConnection():
         # dict indexed by index name and map to a tuple indicating benefit and creation cost of the index
         arm_reward_dict: Dict[str, Tuple[float, float]] = {}
         for query in queries:
-            q_cost, non_clustered_index_usage, clustered_index_usage, table_scans = self.execute_query_v1(query.query_string)
+            q_cost, non_clustered_index_usage0, clustered_index_usage, table_scans = self.execute_query_v1(query.query_string)
             # query_text = format_query_string(query.query_string)
             logging.info(f"Query {query.id} cost: {q_cost}")
             w_execute_cost += q_cost
@@ -358,7 +363,9 @@ class DBConnection():
                 # update non_clustered_index_usage for adjusting index name for hypo_idx_name from hypopg
                 bandit_arm_list_copy = bandit_arm_list
                 bandit_arm_list_copy.update(arm_list_to_add)
-                self.transform_hypopg_index_usage(non_clustered_index_usage, bandit_arm_list_copy)
+                non_clustered_index_usage = self.transform_hypopg_index_usage(non_clustered_index_usage0, bandit_arm_list_copy)
+            else:
+                non_clustered_index_usage = non_clustered_index_usage0.copy()
 
             non_clustered_index_usage = merge_index_use(non_clustered_index_usage)
             clustered_index_usage = merge_index_use(clustered_index_usage)
@@ -744,7 +751,7 @@ class DBConnection():
                     print(f"error executing query {query}")
                 return cursor.fetchone()[0]
             else:
-                query = "select COALESCE(sum(hypopg_relation_size(indexrelid))/1024/1024, 0) from hypopg_list_indexes;"
+                query = "select COALESCE(sum(hypopg_relation_size(indexrelid))/1024/1024, 0) from hypopg_list_indexes();"
                 cursor = self.connection.cursor()
                 cursor.execute(query)
                 res = cursor.fetchall()
@@ -1031,21 +1038,26 @@ class DBConnection():
 
             # e.g., {'LINEITEM': {'L_SHIPDATE': 'r'}}
 
+            query_table_selectivity = {t: 0.0 for t in tables}
             if len(query_plan.clustered_index_usage) == 0\
                 and len(query_plan.non_clustered_index_usage) == 0:
-                query_table_selectivity = {t: 0.0 for t in tables}
+                return query_table_selectivity
             else:
                 c_sel_list_dict = self.get_sel_list_dict_from_index_usage(query_plan.clustered_index_usage)
                 nc_sel_list_dict = self.get_sel_list_dict_from_index_usage(query_plan.non_clustered_index_usage)
+                ts_sel_list_dict = self.get_sel_list_dict_from_table_scan(query_plan.table_scans)
                 sel_list_dict = {}
-                if len(c_sel_list_dict) > 0:
-                    sel_list_dict = c_sel_list_dict.copy()
-                    for t in c_sel_list_dict:
-                        if t in nc_sel_list_dict:
-                            c_sel_list_dict[t].extend(nc_sel_list_dict[t])
+                for t in set(c_sel_list_dict.keys()) | set(nc_sel_list_dict) | set(ts_sel_list_dict):
+                    sel_list_dict[t]=[]
+                    if t in c_sel_list_dict:
+                        sel_list_dict[t].extend(c_sel_list_dict[t])
+                    if t in nc_sel_list_dict:
+                        sel_list_dict[t].extend(nc_sel_list_dict[t])
+                    if t in ts_sel_list_dict:
+                        sel_list_dict[t].extend(ts_sel_list_dict[t])
 
                 query_table_selectivity = {k: 1.0*sum(v)/len(v) for k, v in sel_list_dict.items()}
-            return query_table_selectivity
+                return query_table_selectivity
         else:
             return 1
 
@@ -1054,7 +1066,7 @@ class DBConnection():
         if len(index_usage_list) > 0:
             for usage in index_usage_list:
                 idx_name = usage[0]
-                tbl_name = idx_name.split('_')[0]
+                tbl_name = idx_name.split('_')[0].upper()
                 rows_out = usage[-1]
                 rows_in = usage[-2]
                 sel = 1.0 * rows_out / rows_in
@@ -1064,6 +1076,18 @@ class DBConnection():
                     sel_list_dict[tbl_name] = [sel]
         return sel_list_dict
 
+    def get_sel_list_dict_from_table_scan(self, table_scans: list):
+        sel_list_dict: Dict[str, List[float]] = {}
+        for table_scan in table_scans:
+            tbl_name = table_scan[0]
+            row_out = table_scan[-1]
+            row_in = table_scan[-2]
+            sel = 1.0*row_out/row_in
+            if tbl_name in sel_list_dict:
+                sel_list_dict[tbl_name].append(sel)
+            else:
+                sel_list_dict[tbl_name] = [sel]
+        return sel_list_dict
 
     def remove_all_non_clustered(self, schema_name):
         """
@@ -1130,7 +1154,7 @@ class DBConnection():
             if self.hypo_idx:
                 query = f"""SELECT * FROM hypopg_relation_size({bandit_arm.oid})"""
             else:
-                query = f"select pg_relation_size('{bandit_arm.index_name}')"
+                query = f"select pg_relation_size(indexrelid) from pg_stat_all_indexes where indexrelname=('{bandit_arm.index_name}');"
         else:
             raise NotImplementedError(f"set_arm_size() for {self.db_type} is not implemented.")
 
@@ -1262,5 +1286,5 @@ def merge_index_use(index_uses):
 
 
 def format_query_string(query_string):
-    query_text = query_string.replace('\r\n\t', ' ').replace('\r\n', ' ')
+    query_text = query_string.replace('\r\n\t', ' ').replace('\r\n', ' ').replace('\t', ' ')
     return query_text
