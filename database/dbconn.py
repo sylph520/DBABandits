@@ -203,6 +203,25 @@ class DBConnection():
                 raise
         return idx_creation_cost_dict
 
+    def drop_all_indexes(self):
+        cur = self.connection.cursor()
+        if self.db_type == 'postgresql':
+            query = "select drop_all_indexes();"
+            try:
+                cur.execute(query)
+                self.connection.commit()
+            except psycopg2.OperationalError:
+                raise "error executing drop_all_indexes() in pg"
+        elif self.db_type == 'MSSQL':
+            query = "EXEC dbo.DropAllSecondaryIndexes;"
+            try:
+                cur.execute(query)
+                self.connection.commit()
+            except pyodbc.DatabaseError:
+                raise "error executing drop_all_indexes() in sql server"
+        else:
+            raise NotImplementedError(f"drop_all_indexes() for {self.db_type} not implemented")
+
     def drop_index(self, schema_name, bandit_arm, db_type="postgresql"):
         """
         Drops the index on the given table with given name.
@@ -220,7 +239,7 @@ class DBConnection():
             if self.hypo_idx:
                 query = f"SELECT * FROM hypopg_drop_index({oid})"
             else:
-                query = f"drop index {idx_name};"
+                query = f"drop index \"{idx_name}\";"
 
         cursor = self.connection.cursor()
         cursor.execute(query)
@@ -877,14 +896,14 @@ class DBConnection():
 
         return columns
 
-    def get_tables(self) -> dict:
+    def get_tables(self):
         """
         Get all tables as Table objects.
 
         :param connection: SQL Connection
         :return: Table dictionary with table name as the key
         """
-        tables = {}
+        tables: Dict[str, Table] = {}
         if self.db_type == 'MSSQL':
             get_tables_query = """SELECT TABLE_NAME
                                 FROM INFORMATION_SCHEMA.TABLES

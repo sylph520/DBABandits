@@ -35,7 +35,7 @@ class C3UCB(C3UCBBaseBandit):
     def select_arm(self, context_vectors, current_round):
         pass
 
-    def select_arm_v2(self, context_vectors, current_round):
+    def select_arm_v2(self, context_vectors):
         """
         This method is responsible for returning the super arm
 
@@ -54,15 +54,12 @@ class C3UCB(C3UCBBaseBandit):
             average_reward = (weight_vector.transpose() @ self.context_vectors[i]).item() - creation_cost
             temp_upper_bound = average_reward + self.hyper_alpha * numpy.sqrt(
                 (self.context_vectors[i].transpose() @ v_inverse @ self.context_vectors[i]).item())
-            temp_upper_bound = temp_upper_bound + (creation_cost/constants.CREATION_COST_REDUCTION_FACTOR)
+            temp_upper_bound = temp_upper_bound + (creation_cost / constants.CREATION_COST_REDUCTION_FACTOR)
             self.upper_bounds.append(temp_upper_bound)
 
         logging.debug(self.upper_bounds)
         self.hyper_alpha = self.hyper_alpha / constants.ALPHA_REDUCTION_RATE
-        return self.oracle.get_super_arm(self.upper_bounds, self.context_vectors, self.arms)
-
-    def update(self, played_arms, reward, index_use):
-        pass
+        return self.oracle.get_super_arm(self.upper_bounds, self.arms)
 
     def update_v4(self, played_arms, arm_rewards):
         """

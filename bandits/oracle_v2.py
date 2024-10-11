@@ -1,8 +1,9 @@
 import operator
-from abc import abstractmethod
-
 import numpy
+from abc import abstractmethod
+from typing import Dict
 
+from bandits.bandit_arm import BanditArm
 import constants
 
 
@@ -141,9 +142,9 @@ class BaseOracle:
 
 class OracleV7(BaseOracle):
 
-    def get_super_arm(self, upper_bounds, context_vectors, bandit_arms):
+    def get_super_arm(self, upper_bounds, bandit_arms: Dict[int, BanditArm]):
         used_memory = 0
-        chosen_arms = []
+        chosen_arm_ids = []
         arm_ucb_dict = {}
         table_count = {}
 
@@ -155,7 +156,7 @@ class OracleV7(BaseOracle):
         while len(arm_ucb_dict) > 0:
             max_ucb_arm_id = max(arm_ucb_dict.items(), key=operator.itemgetter(1))[0]
             if bandit_arms[max_ucb_arm_id].memory < self.max_memory - used_memory:
-                chosen_arms.append(max_ucb_arm_id)
+                chosen_arm_ids.append(max_ucb_arm_id)
                 used_memory += bandit_arms[max_ucb_arm_id].memory
                 if bandit_arms[max_ucb_arm_id].table_name in table_count:
                     table_count[bandit_arms[max_ucb_arm_id].table_name] += 1
@@ -170,4 +171,4 @@ class OracleV7(BaseOracle):
             else:
                 arm_ucb_dict.pop(max_ucb_arm_id)
 
-        return chosen_arms
+        return chosen_arm_ids

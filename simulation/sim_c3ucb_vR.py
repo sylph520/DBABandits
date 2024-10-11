@@ -4,12 +4,13 @@ import operator
 import pprint
 import argparse
 import pickle
-from typing import List
+from typing import List, Dict
 import numpy
 from pandas import DataFrame
 
 from shared.configs_v2 import get_exp_config
 import shared.helper as helper
+from bandits.bandit_arm import BanditArm
 import bandits.bandit_c3ucb_v2 as bandits
 import bandits.bandit_helper_v2 as bandit_helper
 import constants as constants
@@ -22,68 +23,34 @@ class Simulator(BaseSimulator):
     def __init__(self, kwargs: dict = ...):
         super().__init__(kwargs)
 
-    def get_round_query_obj_batch_and_update_query_store(self, queries_current_batch, t):
-        query_obj_list_current: List[Query] = []
-        for n in range(len(queries_current_batch)):  # Adding new queries to the query store
-            # for each query, transform and append to the query_obj_store
-            query = queries_current_batch[n]  # a dict of query info
-            query_id = query['id']
-            if query_id in self.query_obj_store:
-                query_obj_in_store = self.query_obj_store[query_id]
-                query_obj_in_store.frequency += 1
-                query_obj_in_store.last_seen_round = t
-                query_obj_in_store.query_string = query['query_string']
-                if query_obj_in_store.first_seen_round == -1:
-                    query_obj_in_store.first_seen_round = t
-            else:
-                query = Query(self.dbconn, query_id, query['query_string'], query['predicates'],
-                              query['payload'], t)
-                query.context = bandit_helper.get_query_context_v1(query, self.all_columns, self.number_of_columns)
-                self.query_obj_store[query_id] = query
-            query_obj_list_current.append(self.query_obj_store[query_id])
-        return query_obj_list_current
-
-    @staticmethod
-    def update_arm_query_info(q_bandit_arms_tmp: dict, round_index_arms: dict):
-        for key, index_arm in q_bandit_arms_tmp.items():  # update the member query info of arms
-            if key not in round_index_arms:  # a new arm
-                index_arm.query_ids = set()
-                index_arm.query_ids_backup = set()
-                round_index_arms[key] = index_arm
-                # index_arm.clustered_index_time = 0
-            # index_arm.clustered_index_time += max(
-            #     query_obj_list_past[i].table_scan_time_dict[index_arm.table_name]) if \
-            #     query_obj_list_past[i].table_scan_time_dict[index_arm.table_name] else 0
-            round_index_arms[key].query_ids.add(index_arm.query_id)
-            round_index_arms[key].query_ids_backup.add(index_arm.query_id)
-
     def run(self):
         pp = pprint.PrettyPrinter()
 
         results = []
-        super_arm_scores = {}
-        super_arm_counts = {}
+        super_arm_scores, super_arm_counts = {}, {}
         best_super_arm = set()
         sim_run_total_time = 0.0
 
-        # logging.info("Logging configs...\n")
-        # helper.log_configs(logging, self.exp_config)
         # logging.info("Logging constants...\n")
         # helper.log_configs(logging, constants)
-        logging.info("Starting MAB...\n")
+        # logging.info("Starting MAB...\n")
 
-        # Create oracle and the bandit
-        c3ucb_bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha, self.exp_config.input_lambda, self.oracle)
+        # Create the bandit
+        c3ucb_bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
+                                     self.exp_config.input_lambda, self.oracle)
 
         # Running the bandit for T rounds and gather the reward
-        round_arm_selection_count = {}
+        run_arm_selection_count = {}
         chosen_arms_last_round = {}
         next_workload_shift = 0
 
         # next_workload_shift act as the workload id, [query_start, query_end] constitude a workload
-        queries_start, queries_end = self.exp_config.queries_start_list[next_workload_shift], self.exp_config.queries_end_list[next_workload_shift]
-        query_obj_additions = []
+        queries_start = self.exp_config.queries_start_list[next_workload_shift]
+        queries_end = self.exp_config.queries_end_list[next_workload_shift]
 
+        query_obj_list_past, query_obj_list_new = [], []
+        query_obj_additions = []
+        self.dbconn.drop_all_indexes()
         for t in range((self.exp_config.rounds + self.exp_config.hyp_rounds)):  # loop through the round batch
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
@@ -100,20 +67,11 @@ class Simulator(BaseSimulator):
                 if len(self.exp_config.workload_shifts) > next_workload_shift + 1:
                     next_workload_shift += 1
 
-            # New set of queries in this batch, required for query execution
             queries_current_batch = self.query_jsons[queries_start:queries_end]
-            query_obj_list_current = self.get_round_query_obj_batch_and_update_query_store(queries_current_batch, t)
+            query_obj_list_current = self.get_query_objs(queries_current_batch, t)
 
-            # This list contains all past queries, we don't include new queries seen for the first time.
-            query_obj_list_past, query_obj_list_new = [], []
-            for key, obj in self.query_obj_store.items():
-                if t - obj.last_seen_round <= constants.QUERY_MEMORY\
-                        and 0 <= obj.first_seen_round < t:  # Have seen in previous rounds
-                    query_obj_list_past.append(obj)
-                elif t - obj.last_seen_round > constants.QUERY_MEMORY:  # To be forgotten
-                    obj.first_seen_round = -1
-                elif obj.first_seen_round == t:  # new seen in the current round
-                    query_obj_list_new.append(obj)
+            # update query_obj_list_past and query_obj_list_new
+            self.update_query_obj_stats(t, query_obj_list_past, query_obj_list_new)
 
             # We don't want to reset in the first round,
             # if there is new additions or removals we identify a workload change
@@ -121,58 +79,37 @@ class Simulator(BaseSimulator):
                 # the number of queries new seen in round t-1 vs. the number of seen queries in rounds 0-(t-1)
                 # if the former term > the latter term:
                 workload_change = len(query_obj_additions) / len(query_obj_list_past)
+                # reset or update the bandit weights, v, b
                 c3ucb_bandit.workload_change_trigger(workload_change)
 
             # this rounds new will be the additions for the next round
             query_obj_additions = query_obj_list_new
 
             # Get the predicates for queries and Generate index arms for each query
-            round_index_arms = {}
+            w_index_arms = {}  # {str_id: arm}
             # TODO: whether only considering arms for previously seen queries reasonable
             if t == self.exp_config.hyp_rounds and self.exp_config.hyp_rounds != 0:
-                round_index_arms = {}
+                w_index_arms = {}
             else:
                 for i in range(len(query_obj_list_past)):  # for each previously seen query
                     q_bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(
                         self.dbconn, query_obj_list_past[i])
-                    self.update_arm_query_info(q_bandit_arms_tmp, round_index_arms)
+                    self.update_arm_query_info(q_bandit_arms_tmp, w_index_arms)
 
-            index_arm_list = list(round_index_arms.values())
+            index_arm_list = list(w_index_arms.values())
             logging.info(f"Generated {len(index_arm_list)} arms")
             c3ucb_bandit.set_arms(index_arm_list)
 
-            # creating the context, here we pass all the columns in the database
-            context_vectors_v1 = bandit_helper.get_name_encode_context_vectors_v2(round_index_arms, self.all_columns,
-                                                                                  self.number_of_columns,
-                                                                                  constants.CONTEXT_UNIQUENESS,
-                                                                                  constants.CONTEXT_INCLUDES)
-            context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(self.dbconn, round_index_arms, query_obj_list_past,
-                                                                                    chosen_arms_last_round, not constants.CONTEXT_INCLUDES)
-            context_vectors = []
-            for i in range(len(context_vectors_v1)):
-                context_vectors.append(
-                    numpy.array(list(context_vectors_v2[i]) + list(context_vectors_v1[i]),
-                                ndmin=2))
+            context_vectors = self.get_context_vectors_for_arms(w_index_arms, query_obj_list_past, chosen_arms_last_round)
 
             # getting the super arm from the bandit
             if t >= self.exp_config.hyp_rounds and t - self.exp_config.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
                 chosen_arm_ids = list(best_super_arm)
             else:
-                chosen_arm_ids = c3ucb_bandit.select_arm_v2(context_vectors, t)
+                chosen_arm_ids = c3ucb_bandit.select_arm_v2(context_vectors)
 
             # get objects for the chosen set of arm ids
-            chosen_arms = {}
-            used_memory = 0
-            if chosen_arm_ids:
-                chosen_arms = {}
-                for arm in chosen_arm_ids:
-                    index_name = index_arm_list[arm].index_name
-                    chosen_arms[index_name] = index_arm_list[arm]
-                    used_memory = used_memory + index_arm_list[arm].memory
-                    if index_name in round_arm_selection_count:
-                        round_arm_selection_count[index_name] += 1
-                    else:
-                        round_arm_selection_count[index_name] = 1
+            chosen_arms = self.update_choosen_arms_from_ids(chosen_arm_ids, index_arm_list, run_arm_selection_count)
 
             # clean everything at start of actual rounds
             if self.exp_config.hyp_rounds != 0 and t == self.exp_config.hyp_rounds:
@@ -207,14 +144,15 @@ class Simulator(BaseSimulator):
                                                                                                chosen_arms, added_arms,
                                                                                                deleted_arms,
                                                                                                query_obj_list_current)
+
             end_time_create_query = datetime.datetime.now()
             idx_creation_cost = sum(creation_cost_dict.values())
 
             if t == self.exp_config.hyp_rounds and self.exp_config.hyp_rounds != 0:
                 # logging arm usage counts
                 logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
-                    sorted(round_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
-                round_arm_selection_count = {}
+                    sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
+                run_arm_selection_count = {}
 
             c3ucb_bandit.update_v4(chosen_arm_ids, arm_rewards)
 
@@ -240,20 +178,11 @@ class Simulator(BaseSimulator):
                 self.dbconn.bulk_drop_index(constants.SCHEMA_NAME, chosen_arms)
 
             # Adding information to the results array
-            if t >= self.exp_config.hyp_rounds:
-                actual_round_number = t - self.exp_config.hyp_rounds
-                recommendation_time = (round_end_time - round_start_time).total_seconds() - (
-                    end_time_create_query - start_time_create_query).total_seconds()
-                round_total_time = idx_creation_cost + time_taken + recommendation_time
-                results.append([actual_round_number, constants.MEASURE_BATCH_TIME, round_total_time])
-                results.append([actual_round_number, constants.MEASURE_INDEX_CREATION_COST, idx_creation_cost])
-                results.append([actual_round_number, constants.MEASURE_QUERY_EXECUTION_COST, time_taken])
-                results.append([actual_round_number, constants.MEASURE_INDEX_RECOMMENDATION_COST, recommendation_time])
-                results.append([actual_round_number, constants.MEASURE_MEMORY_COST, current_config_size])
-            else:
-                round_total_time = (round_end_time - round_start_time).total_seconds() - (
-                    end_time_create_query - start_time_create_query).total_seconds()
-                results.append([t, constants.MEASURE_HYP_BATCH_TIME, round_total_time])
+            round_total_time = self.update_results(results, t, round_start_time, round_end_time,
+                                                   start_time_create_query, end_time_create_query,
+                                                   idx_creation_cost, time_taken,
+                                                   current_config_size, sim_run_total_time,
+                                                   super_arm_scores)
             sim_run_total_time += round_total_time
 
             if t >= self.exp_config.hyp_rounds:
@@ -263,9 +192,109 @@ class Simulator(BaseSimulator):
 
         logging.info("Time taken by bandit for " + str(self.exp_config.rounds) + " rounds: " + str(sim_run_total_time))
         logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
-            sorted(round_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
+            sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
         # self.connection.restart_db()
         return results, sim_run_total_time
+
+    def get_query_objs(self, queries_current_batch, t):
+        query_obj_list_current: List[Query] = []
+        for n in range(len(queries_current_batch)):  # Adding new queries to the query store
+            # for each query, transform and append to the query_obj_store
+            query = queries_current_batch[n]  # a dict of query info
+            query_id = query['id']
+            if query_id in self.query_obj_store:
+                query_obj_in_store = self.query_obj_store[query_id]
+                query_obj_in_store.frequency += 1
+                query_obj_in_store.last_seen_round = t
+                query_obj_in_store.query_string = query['query_string']
+                if query_obj_in_store.first_seen_round == -1:
+                    query_obj_in_store.first_seen_round = t
+            else:
+                query = Query(self.dbconn, query_id, query['query_string'], query['predicates'],
+                              query['payload'], t)
+                query.context = bandit_helper.get_query_context_v1(query, self.all_columns, self.number_of_columns)
+                self.query_obj_store[query_id] = query
+            query_obj_list_current.append(self.query_obj_store[query_id])
+        return query_obj_list_current
+
+    @staticmethod
+    def update_arm_query_info(q_bandit_arms_tmp: Dict[str, BanditArm], round_index_arms: Dict[str, BanditArm]):
+        """
+        update round_index_arms info from q_bandit_arms_tmp
+        """
+        for key, index_arm in q_bandit_arms_tmp.items():  # update the member query info of arms
+            if key not in round_index_arms:  # a new arm
+                index_arm.query_ids = set()
+                index_arm.query_ids_backup = set()
+                round_index_arms[key] = index_arm
+                # index_arm.clustered_index_time = 0
+            # index_arm.clustered_index_time += max(
+            #     query_obj_list_past[i].table_scan_time_dict[index_arm.table_name]) if \
+            #     query_obj_list_past[i].table_scan_time_dict[index_arm.table_name] else 0
+            round_index_arms[key].query_ids.add(index_arm.query_id)
+            round_index_arms[key].query_ids_backup.add(index_arm.query_id)
+
+    def update_query_obj_stats(self, t, query_obj_list_past, query_obj_list_new):
+        # This list contains all past queries, we don't include new queries seen for the first time.
+        for _, obj in self.query_obj_store.items():
+            if t - obj.last_seen_round <= constants.QUERY_MEMORY\
+                    and 0 <= obj.first_seen_round < t:  # Have seen in previous rounds
+                query_obj_list_past.append(obj)
+            elif t - obj.last_seen_round > constants.QUERY_MEMORY:  # To be forgotten
+                obj.first_seen_round = -1
+            elif obj.first_seen_round == t:  # new seen in the current round
+                query_obj_list_new.append(obj)
+
+    def get_context_vectors_for_arms(self, round_index_arms, query_obj_list_past, chosen_arms_last_round):
+        # creating the context, here we pass all the columns in the database
+        context_vectors_v1 = bandit_helper.get_name_encode_context_vectors_v2(round_index_arms, self.all_columns,
+                                                                              self.number_of_columns,
+                                                                              constants.CONTEXT_UNIQUENESS,
+                                                                              constants.CONTEXT_INCLUDES)
+        context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(self.dbconn, round_index_arms, query_obj_list_past,
+                                                                                chosen_arms_last_round, not constants.CONTEXT_INCLUDES)
+        context_vectors = []
+        for i in range(len(context_vectors_v1)):
+            context_vectors.append(
+                numpy.array(list(context_vectors_v2[i]) + list(context_vectors_v1[i]),
+                            ndmin=2))
+
+        return context_vectors
+
+    def update_choosen_arms_from_ids(self, chosen_arm_ids: list, index_arm_list: list,
+                                     round_arm_selection_count: dict):
+        chosen_arms = {}
+        for arm in chosen_arm_ids:
+            index_name = index_arm_list[arm].index_name
+            chosen_arms[index_name] = index_arm_list[arm]
+            if index_name in round_arm_selection_count:
+                round_arm_selection_count[index_name] += 1
+            else:
+                round_arm_selection_count[index_name] = 1
+        return chosen_arms
+
+    def update_results(self, results, t,
+                       round_start_time, round_end_time,
+                       start_time_create_query, end_time_create_query,
+                       idx_creation_cost, time_taken,
+                       current_config_size, sim_run_total_time,
+                       super_arm_scores):
+        if t >= self.exp_config.hyp_rounds:
+            actual_round_number = t - self.exp_config.hyp_rounds
+            recommendation_time = (round_end_time - round_start_time).total_seconds() - (
+                end_time_create_query - start_time_create_query).total_seconds()
+            round_total_time = idx_creation_cost + time_taken + recommendation_time
+            results.append([actual_round_number, constants.MEASURE_BATCH_TIME, round_total_time])
+            results.append([actual_round_number, constants.MEASURE_INDEX_CREATION_COST, idx_creation_cost])
+            results.append([actual_round_number, constants.MEASURE_QUERY_EXECUTION_COST, time_taken])
+            results.append([actual_round_number, constants.MEASURE_INDEX_RECOMMENDATION_COST, recommendation_time])
+            results.append([actual_round_number, constants.MEASURE_MEMORY_COST, current_config_size])
+        else:
+            round_total_time = (round_end_time - round_start_time).total_seconds() - (
+                end_time_create_query - start_time_create_query).total_seconds()
+            results.append([t, constants.MEASURE_HYP_BATCH_TIME, round_total_time])
+
+        return round_total_time
 
 
 if __name__ == "__main__":

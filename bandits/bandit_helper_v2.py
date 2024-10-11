@@ -6,9 +6,10 @@ import numpy
 import constants as constants
 from bandits.bandit_arm import BanditArm
 from database.dbconn import DBConnection
+from database.query_v5 import Query
 
 
-def gen_arms_from_predicates_v2(connection: DBConnection, query_obj):
+def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
     """
     This method take predicates (a dictionary of lists) as input and creates the generate arms for all possible
     column combinations
