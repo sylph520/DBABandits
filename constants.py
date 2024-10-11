@@ -1,5 +1,6 @@
 import logging
 import os
+from shared.minimal_len_colnames import get_db_colname_prefixs
 
 # ===============================  Program Related  ===============================
 DB_CONFIG = '/config/db.conf'
@@ -101,3 +102,8 @@ TABLE_SCAN_TIMES = {"SSB": {"customer": [], "dwdate": [], "lineorder": [], "part
                               "movie_companies": [], "movie_info": [], "movie_info_idx": [], "movie_keyword": [], "movie_link": [],
                               "name": [], "person_info": [], "role_type": [], "title": []}
                     }
+
+tpch_db_colname_prefixs = get_db_colname_prefixs('tpch010', save=True)
+tpcds_db_colname_prefixs = get_db_colname_prefixs('indexselection_tpcds___10', save=True)
+db_colname_prefixs = tpch_db_colname_prefixs.copy()
+db_colname_prefixs.update(tpcds_db_colname_prefixs)

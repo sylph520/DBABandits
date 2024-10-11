@@ -6,6 +6,7 @@ from bandits.bandit_arm import BanditArm
 from bandits.oracle_v2 import OracleV7 as Oracle
 import shared.helper as helper
 import constants
+from shared.configs_v2 import ExpConf
 
 
 # Simulation built on vQ to collect the super arm performance
@@ -30,7 +31,7 @@ class BaseSimulator:
         # logging.getLogger().setLevel(logging.INFO)
 
         self.db_conf_dict = kwargs['db_conf']
-        self.exp_config = kwargs['exp_conf']
+        self.exp_config: ExpConf = kwargs['exp_conf']
         self.db_type = self.db_conf_dict['db_type']
 
         self.dbconn = DBConnection(self.db_conf_dict)
@@ -49,4 +50,3 @@ class BaseSimulator:
         self.max_memory = self.exp_config.max_memory - int(self.dbconn.get_current_pds_size())
 
         self.oracle = Oracle(self.max_memory)
-
