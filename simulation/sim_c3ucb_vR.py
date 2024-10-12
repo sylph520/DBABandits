@@ -6,6 +6,7 @@ import argparse
 import pickle
 from typing import List, Dict
 import numpy
+import pandas as pd
 from pandas import DataFrame
 
 from shared.configs_v2 import get_exp_config
@@ -225,8 +226,7 @@ class Simulator(BaseSimulator):
             round_total_time = self.update_results(results, t, round_start_time, round_end_time,
                                                    start_time_create_query, end_time_create_query,
                                                    idx_creation_cost, time_taken,
-                                                   current_config_size, sim_run_total_time,
-                                                   super_arm_scores)
+                                                   current_config_size)
             sim_run_total_time += round_total_time
 
             if t >= self.exp_config.hyp_rounds:
@@ -321,8 +321,7 @@ class Simulator(BaseSimulator):
                        round_start_time, round_end_time,
                        start_time_create_query, end_time_create_query,
                        idx_creation_cost, time_taken,
-                       current_config_size, sim_run_total_time,
-                       super_arm_scores):
+                       current_config_size):
         if t >= self.exp_config.hyp_rounds:
             actual_round_number = t - self.exp_config.hyp_rounds
             recommendation_time = (round_end_time - round_start_time).total_seconds() - (
@@ -390,10 +389,12 @@ if __name__ == "__main__":
         for r in range(local_exp_config.reps):
             simulator = Simulator(conf_dict)
             sim_results, total_workload_time = simulator.run()
+            sim_results.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
             temp = DataFrame(sim_results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])
-            temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
-            temp[constants.DF_COL_REP] = r
+            # temp.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
+            # temp = pd.concat([temp, pd.DataFrame([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])])
+            temp.loc[:, constants.DF_COL_REP] = r
             exp_report_mab.add_data_list(temp)
 
     # plot line graphs

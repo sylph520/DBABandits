@@ -126,7 +126,7 @@ def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False):
         final_df = final_df[final_df[constants.DF_COL_MEASURE_NAME] == measurement_name]
         # Error style = 'band' / 'bars'
         sns_plot = sns.relplot(x=constants.DF_COL_BATCH, y=constants.DF_COL_MEASURE_VALUE, hue=constants.DF_COL_COMP_ID,
-                               kind="line", ci="sd", data=final_df, err_style="band")
+                               kind="line", errorbar="sd", data=final_df, err_style="band")
         if log_y:
             sns_plot.set(yscale="log")
         plot_title = measurement_name + " Comparison"
