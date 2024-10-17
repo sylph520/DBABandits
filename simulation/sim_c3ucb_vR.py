@@ -87,6 +87,7 @@ class Simulator(BaseSimulator):
         query_obj_list_past, query_obj_list_new = [], []
         query_obj_additions = []
         self.dbconn.drop_all_indexes()
+        round_time_list = []
         for t in range((self.exp_config.rounds + self.exp_config.hyp_rounds)):  # loop through the round batch
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
@@ -228,6 +229,7 @@ class Simulator(BaseSimulator):
                                                    idx_creation_cost, time_taken,
                                                    current_config_size)
             sim_run_total_time += round_total_time
+            round_time_list.append(round_total_time)
 
             if t >= self.exp_config.hyp_rounds:
                 best_super_arm = min(super_arm_scores, key=super_arm_scores.get)
@@ -238,6 +240,10 @@ class Simulator(BaseSimulator):
         logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
             sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
         # self.connection.restart_db()
+        print(round_time_list)
+        import numpy as np
+        print((round_time_list[0] - np.array(round_time_list))/round_time_list[0])
+        print(np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0])
         return results, sim_run_total_time
 
     def get_query_objs(self, queries_current_batch, t):
@@ -342,7 +348,8 @@ class Simulator(BaseSimulator):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp_id', type=str, default='tpc_h_static_10_MAB')
+    # parser.add_argument('--exp_id', type=str, default='tpc_h_static_10_MAB')
+    parser.add_argument('--exp_id', type=str, default='tpch_static_1_MAB')
     parser.add_argument('--db_type', type=str, default='postgresql')
     args = parser.parse_args()
 

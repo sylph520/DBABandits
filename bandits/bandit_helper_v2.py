@@ -24,7 +24,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
     query_id = query_obj.id  # int
     tables = connection.tables_global
     for table_name, table_predicates in predicates.items():  # generate & update arms from predicates
-        table = tables[table_name]
+        table = tables[table_name.upper()]
         includes = []
         if table_name in q_payloads:
             includes = list(set(q_payloads[table_name]) - set(table_predicates))
@@ -62,7 +62,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
                         bandit_arm.is_include = 1
                 bandit_arm.arm_value[query_id] = arm_value
                 connection.bandit_arm_store[arm_str_id] = bandit_arm
-            if bandit_arm not in q_bandit_arms:
+            if bandit_arm.index_name not in q_bandit_arms:
                 q_bandit_arms[arm_str_id] = bandit_arm
 
     for table_name, table_payloads in q_payloads.items():
@@ -98,7 +98,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
 
     if constants.INDEX_INCLUDES:
         for table_name, table_predicates in predicates.items():
-            table = tables[table_name]
+            table = tables[table_name.upper()]
             if table.table_row_count < constants.SMALL_TABLE_IGNORE:
                 continue
             includes = []

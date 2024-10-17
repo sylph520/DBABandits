@@ -42,7 +42,18 @@ class DBConnection():
         self.bandit_arm_store: Dict[str, BanditArm] = {}
 
         self.database = db_conf_dict['database']
-        self.benchmark_type = self.database[:-4].upper()
+        # self.benchmark_type = self.database[:-4].upper()
+        if 'tpch' in self.database:
+            self.benchmark_type = 'TPCH'
+        elif 'tpcds' in self.database:
+            self.benchmark_type = 'TCPDS'
+        elif 'job' in self.database:
+            self.benchmark_type = 'JOB'
+        elif 'SSB' in self.database:
+            self.benchmark_type = 'SSB'
+        else:
+            raise
+
         self.table_scan_times_hyp = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
         self.conn_table_scan_time_dict = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
         self.conn_cluster_idx_scan_time_dict = copy.deepcopy(constants.TABLE_SCAN_TIMES[self.benchmark_type])
@@ -105,7 +116,7 @@ class DBConnection():
                             f" INCLUDE ({', '.join(include_cols)})"
                 else:
                     idx_query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})"
-                query = f"SELECT * FROM hypopg_create_index('{query}');"
+                query = f"SELECT * FROM hypopg_create_index('{idx_query}');"
                 cursor.execute(query)
                 res = cursor.fetchone()
                 self.connection.commit()
@@ -206,7 +217,10 @@ class DBConnection():
     def drop_all_indexes(self):
         cur = self.connection.cursor()
         if self.db_type == 'postgresql':
-            query = "select drop_all_indexes();"
+            if not self.hypo_idx:
+                query = "select drop_all_indexes();"
+            else:
+                query = "select hypopg_reset();"
             try:
                 cur.execute(query)
                 self.connection.commit()
@@ -403,7 +417,7 @@ class DBConnection():
             nc_idx_acccess_table_counts = {}
             for index_use in non_clustered_index_usage:  # for each non_clustered_index usage
                 index_name = index_use[0]
-                table_name = bandit_arm_list[index_name].table_name
+                table_name = bandit_arm_list[index_name].table_name.upper()
 
                 idx_creation_cost = idx_creation_cost_dict[index_name]
                 idx_scan_cost = index_use[constants.COST_TYPE_CURRENT_EXECUTION]
@@ -1286,11 +1300,15 @@ def transform_hypopg_index_name(hypo_idx_name, arms):
     if '<' in hypo_idx_name:
         _split_list = hypo_idx_name.split('>')[1].split('_')[1:]  # e.g., ['lineitem', 'l', 'orderkey', 'l', 'shipmode', 'l', 'receiptdate', 'l', 'shipdate']
         tbl_name = _split_list[0].upper()
-        tabled_idx_name = tbl_name + '_' + '_'.join(_split_list[1:])
-    for arm in arms:
-        arm_tabled_idx_name = '_'.join(arm.split('_')[1:])
-        if arm_tabled_idx_name == tabled_idx_name:
-            return arm
+        # tabled_idx_name = tbl_name + '_' + '_'.join(_split_list[1:])
+        cols_str = '_'.join(_split_list[1:])
+    for arm_name in arms:
+        arm = arms[arm_name]
+        arm_cols_str = ('_'.join(arm.index_cols)).lower()
+        if arm.include_cols:
+            arm_cols_str += '_' + ('_'.join(arm.include_cols)).lower()
+        if arm_cols_str == cols_str:
+            return arm_name
     """btree_lineitem_l_shipmode_l_partkey_l_quantity_l_shipinstruct_l_disco"""
     raise ValueError(f"no bandits with name similar to {hypo_idx_name}")
 
