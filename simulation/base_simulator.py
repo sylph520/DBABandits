@@ -48,5 +48,6 @@ class BaseSimulator:
         self.context_size = self.number_of_columns * (
             1 + constants.CONTEXT_UNIQUENESS + constants.CONTEXT_INCLUDES) + constants.STATIC_CONTEXT_SIZE
         self.max_memory = self.exp_config.max_memory - int(self.dbconn.get_current_pds_size())
+        self.max_idxnum = self.exp_config.max_idxnum - len(self.dbconn.get_current_index())
 
-        self.oracle = Oracle(self.max_memory)
+        self.oracle = Oracle(self.max_memory, self.max_idxnum)

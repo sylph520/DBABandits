@@ -88,10 +88,13 @@ class Simulator(BaseSimulator):
         query_obj_additions = []
         self.dbconn.drop_all_indexes()
         round_time_list = []
+        rec_time_list = []
         for t in range((self.exp_config.rounds + self.exp_config.hyp_rounds)):  # loop through the round batch
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
+            self.dbconn.drop_all_indexes()
             round_start_time = datetime.datetime.now()
+            rec_time_start = datetime.datetime.now()
             # At the start of the round we will read the applicable set for the current round.
             # This is a workaround used to demo the dynamic query flow.
             # We read the queries from the start and move the window each round
@@ -179,6 +182,8 @@ class Simulator(BaseSimulator):
             for key in key_deletions:
                 deleted_arms[key] = chosen_arms_last_round[key]
 
+            rec_time_end = datetime.datetime.now()
+            rec_time_list.append((rec_time_end - rec_time_start).total_seconds())
             start_time_create_query = datetime.datetime.now()
             # arm_rewards: tuple (gains, creation cost) reward got form playing each arm
             if t < self.exp_config.hyp_rounds:
@@ -244,6 +249,8 @@ class Simulator(BaseSimulator):
         import numpy as np
         print((round_time_list[0] - np.array(round_time_list))/round_time_list[0])
         print(np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0])
+        print(rec_time_list)
+        print(np.mean(rec_time_list))
         return results, sim_run_total_time
 
     def get_query_objs(self, queries_current_batch, t):

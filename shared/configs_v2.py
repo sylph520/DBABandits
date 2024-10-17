@@ -13,7 +13,7 @@ ExpConf = namedtuple('ExpConf', [
     'workload_shifts', 'queries_start_list', 'queries_end_list',
     'config_shifts', 'config_start_list', 'config_end_list',
     'ta_runs', 'ta_workload', 'workload_file', 'components', 'mab_versions',
-    'max_memory', 'input_alpha', 'input_lambda']
+    'max_memory', 'max_idxnum', 'input_alpha', 'input_lambda']
 )
 
 
@@ -50,7 +50,8 @@ def get_exp_config(exp_id=''):
         components=json.loads(exp_config[experiment_id]['components']),
         mab_versions=json.loads(exp_config[experiment_id]['mab_versions']),
         # constraints,
-        max_memory=int(exp_config[experiment_id]['max_memory']),
+        max_memory=int(exp_config[experiment_id]['max_memory']) if 'max_memory' in exp_config[experiment_id] else 0,
+        max_idxnum = int(exp_config[experiment_id]['max_idxnum']) if 'max_idxnum' in exp_config[experiment_id] else 0,
         # hyper parameters,
         input_alpha=float(exp_config[experiment_id]['input_alpha']),
         input_lambda=float(exp_config[experiment_id]['input_lambda']),

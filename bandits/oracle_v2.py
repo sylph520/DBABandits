@@ -9,8 +9,9 @@ import constants
 
 class BaseOracle:
 
-    def __init__(self, max_memory):
+    def __init__(self, max_memory, max_idxnum):
         self.max_memory = max_memory
+        self.max_idxnum = max_idxnum
 
     @abstractmethod
     def get_super_arm(self, upper_bounds, context_vectors, bandit_arms):
@@ -58,8 +59,8 @@ class BaseOracle:
         """
         reduced_arm_ucb_dict = {}
         for arm_id in arm_ucb_dict:
-            if not (bandit_arms[arm_id].table_name == bandit_arms[chosen_id].table_name and table_count[
-                    bandit_arms[arm_id].table_name] >= constants.MAX_INDEXES_PER_TABLE):
+            if not (bandit_arms[arm_id].table_name == bandit_arms[chosen_id].table_name and
+                    table_count[bandit_arms[arm_id].table_name] >= constants.MAX_INDEXES_PER_TABLE):
                 reduced_arm_ucb_dict[arm_id] = arm_ucb_dict[arm_id]
         return reduced_arm_ucb_dict
 
@@ -153,22 +154,40 @@ class OracleV7(BaseOracle):
 
         arm_ucb_dict = self.removed_low_expected_rewards(arm_ucb_dict, 0)
 
-        while len(arm_ucb_dict) > 0:
-            max_ucb_arm_id = max(arm_ucb_dict.items(), key=operator.itemgetter(1))[0]
-            if bandit_arms[max_ucb_arm_id].memory < self.max_memory - used_memory:
+        if len(arm_ucb_dict) == 0:
+            return []
+        if self.max_memory > 0:  # memory constrained
+            while len(arm_ucb_dict) > 0:
+                max_ucb_arm_id = max(arm_ucb_dict.items(), key=operator.itemgetter(1))[0]
+                if bandit_arms[max_ucb_arm_id].memory < self.max_memory - used_memory:
+                    chosen_arm_ids.append(max_ucb_arm_id)
+                    used_memory += bandit_arms[max_ucb_arm_id].memory
+                    if bandit_arms[max_ucb_arm_id].table_name in table_count:
+                        table_count[bandit_arms[max_ucb_arm_id].table_name] += 1
+                    else:
+                        table_count[bandit_arms[max_ucb_arm_id].table_name] = 1
+                    arm_ucb_dict = self.reduce_arm_dict_by_selection(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
+                    arm_ucb_dict = self.removed_covered_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms,
+                                                           self.max_memory - used_memory)
+                else:
+                    arm_ucb_dict.pop(max_ucb_arm_id)
+        else:  # index number constrained
+            assert self.max_idxnum > 0
+            for i in range(self.max_idxnum):
+                max_ucb_arm_id = max(arm_ucb_dict.items(), key=operator.itemgetter(1))[0]
                 chosen_arm_ids.append(max_ucb_arm_id)
-                used_memory += bandit_arms[max_ucb_arm_id].memory
                 if bandit_arms[max_ucb_arm_id].table_name in table_count:
                     table_count[bandit_arms[max_ucb_arm_id].table_name] += 1
                 else:
                     table_count[bandit_arms[max_ucb_arm_id].table_name] = 1
-                arm_ucb_dict = self.removed_covered_tables(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
-                arm_ucb_dict = self.removed_covered_clusters(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
-                arm_ucb_dict = self.removed_covered_queries_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
-                arm_ucb_dict = self.removed_covered_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms,
-                                                       self.max_memory - used_memory)
-                arm_ucb_dict = self.removed_same_prefix(arm_ucb_dict, max_ucb_arm_id, bandit_arms, 1)
-            else:
-                arm_ucb_dict.pop(max_ucb_arm_id)
-
+                arm_ucb_dict = self.reduce_arm_dict_by_selection(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
+                if len(arm_ucb_dict) == 0:
+                    break
         return chosen_arm_ids
+
+    def reduce_arm_dict_by_selection(self, arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count):
+        arm_ucb_dict = self.removed_covered_tables(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
+        arm_ucb_dict = self.removed_covered_clusters(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
+        arm_ucb_dict = self.removed_covered_queries_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
+        arm_ucb_dict = self.removed_same_prefix(arm_ucb_dict, max_ucb_arm_id, bandit_arms, 1)
+        return arm_ucb_dict
