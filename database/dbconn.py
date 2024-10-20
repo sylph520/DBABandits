@@ -35,6 +35,8 @@ class DBConnection():
         self.connection = self.get_sql_connection(db_conf_dict)
         self.db_type = self.get_connection_type(self.connection)
         self.hypo_idx = db_conf_dict['hypo_idx']
+        if self.hypo_idx:
+            self.set_up_hypopg()
         self.pk_columns_dict = {}
         self.tables_global = self.get_tables()
 
@@ -67,8 +69,24 @@ class DBConnection():
         """
         return self.connection.close()
 
+    def set_up_hypopg(self):
+        self.hypopg_v = self.get_hypopg_version()
+
+        hypopg_list_indexes_fn = "hypopg_list_indexes"
+        if self.hypopg_v > '1.1.3':
+            pass
+        else:
+            hypopg_list_indexes_fn += "()"
+        self.hypopg_list_indexes_fn = hypopg_list_indexes_fn
+
+    def get_hypopg_version(self) -> bool:
+        cur = self.connection.cursor()
+        cur.execute("SELECT default_version FROM pg_available_extensions WHERE name ='hypopg';")
+        version = cur.fetchone()[0]
+        return version
+
     def get_current_index(self):
-        query = "SELECT * FROM hypopg_list_indexes();"
+        query = f"SELECT * FROM {self.hypopg_list_indexes_fn};"
         cursor = self.connection.cursor()
         cursor.execute(query)
         indexes = cursor.fetchall()
@@ -784,7 +802,7 @@ class DBConnection():
                     print(f"error executing query {query}")
                 return cursor.fetchone()[0]
             else:
-                query = "select COALESCE(sum(hypopg_relation_size(indexrelid))/1024/1024, 0) from hypopg_list_indexes();"
+                query = f"select COALESCE(sum(hypopg_relation_size(indexrelid))/1024/1024, 0) from {self.hypopg_list_indexes_fn};"
                 cursor = self.connection.cursor()
                 cursor.execute(query)
                 res = cursor.fetchall()
