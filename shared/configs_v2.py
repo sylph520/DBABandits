@@ -17,7 +17,7 @@ ExpConf = namedtuple('ExpConf', [
 )
 
 
-def get_exp_config(exp_id=''):
+def get_exp_config(exp_id='', variedW_id=0):
     # Reading the configuration for given experiment ID
     exp_config = configparser.ConfigParser()
     exp_config.read(constants.ROOT_DIR + constants.EXPERIMENT_CONFIG)
@@ -27,6 +27,19 @@ def get_exp_config(exp_id=''):
         experiment_id = exp_id
     else:
         experiment_id = exp_config['general']['run_experiment']
+    if variedW_id == 0:
+        pass
+    else:
+        if variedW_id == 1:  # VW1
+            workload_file = '/resources/workloads/VW1.json'
+        elif variedW_id == 2:  # VW2
+            workload_file = '/resources/workloads/VW2.json'
+        elif variedW_id == 3:  # shuffled
+            workload_file = '/resources/workloads/shf.json'
+            pass
+        else:
+            raise ValueError(f"variedW_id {variedW_id} not supported")
+
     exp_conf_nt = ExpConf(
         experiment_id=experiment_id,
         hypo_idx=exp_config['general']['hypo_idx'],

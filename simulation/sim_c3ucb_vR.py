@@ -357,11 +357,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # parser.add_argument('--exp_id', type=str, default='tpc_h_static_10_MAB')
     parser.add_argument('--exp_id', type=str, default='tpch_static_1_MAB')
+    parser.add_argument('--variedW_id', type=int, default=0)
+    parser.add_argument('--shuffle_flag', type=int, default=0)
     parser.add_argument('--db_type', type=str, default='postgresql')
     args = parser.parse_args()
 
     exp_id = args.exp_id
     db_type = args.db_type
+    variedW_id = args.variedW_id
+    shuffle_flag = args.shuffle_flag
 
     FROM_FILE = False
     SEPARATE_EXPERIMENTS = True
@@ -375,7 +379,8 @@ if __name__ == "__main__":
 
     if SEPARATE_EXPERIMENTS:
         exp_report_list = []
-    local_exp_config = get_exp_config(exp_id=exp_id)
+    local_exp_config = get_exp_config(exp_id=exp_id, variedW_id=variedW_id)
+
     hypo_idx = True if local_exp_config.hypo_idx in ['true', 'True'] else False
     database_name = local_exp_config.database
     conf_dict = {
