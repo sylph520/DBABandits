@@ -29,7 +29,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
         if table_name in q_payloads:
             includes = list(set(q_payloads[table_name]) - set(table_predicates))
         if table.table_row_count < constants.SMALL_TABLE_IGNORE or (
-                query_obj.selectivity[table_name] > constants.TABLE_MIN_SELECTIVITY and len(includes) > 0):
+                query_obj.selectivity[table_name.upper()] > constants.TABLE_MIN_SELECTIVITY and len(includes) > 0):
             continue
 
         col_permutations = []
@@ -40,7 +40,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
         for col_permutation in col_permutations:
             arm_str_id = BanditArm.get_arm_str_id(col_permutation, table_name, db_type=connection.db_type)
             table_row_count = table.table_row_count
-            arm_value = (1 - query_obj.selectivity[table_name]) * (
+            arm_value = (1 - query_obj.selectivity[table_name.upper()]) * (
                 len(col_permutation) / len(table_predicates)) * table_row_count
             if arm_str_id in connection.bandit_arm_store:  # update the value of arm if it already exists
                 bandit_arm = connection.bandit_arm_store[arm_str_id]
@@ -109,7 +109,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
                 for col_permutation in col_permutations:
                     arm_id_with_include = BanditArm.get_arm_str_id(col_permutation, table_name, includes, db_type=connection.db_type)
                     table_row_count = table.table_row_count
-                    arm_value = (1 - query_obj.selectivity[table_name]) * table_row_count
+                    arm_value = (1 - query_obj.selectivity[table_name.upper()]) * table_row_count
                     if arm_id_with_include not in connection.bandit_arm_store:
                         size_with_includes = connection.get_estimated_size_of_index_v1(constants.SCHEMA_NAME,
                                                                                        table_name,

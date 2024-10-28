@@ -89,10 +89,11 @@ class Simulator(BaseSimulator):
         self.dbconn.drop_all_indexes()
         round_time_list = []
         rec_time_list = []
+        run_start_time = datetime.datetime.now()
         for t in range((self.exp_config.rounds + self.exp_config.hyp_rounds)):  # loop through the round batch
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
-            self.dbconn.drop_all_indexes()
+            # self.dbconn.drop_all_indexes()
             round_start_time = datetime.datetime.now()
             rec_time_start = datetime.datetime.now()
             # At the start of the round we will read the applicable set for the current round.
@@ -233,24 +234,28 @@ class Simulator(BaseSimulator):
                                                    start_time_create_query, end_time_create_query,
                                                    idx_creation_cost, time_taken,
                                                    current_config_size)
+            print(f"current round {t}: ", round_total_time)
             sim_run_total_time += round_total_time
             round_time_list.append(round_total_time)
 
             if t >= self.exp_config.hyp_rounds:
                 best_super_arm = min(super_arm_scores, key=super_arm_scores.get)
 
-            print(f"current total {t}: ", sim_run_total_time)
+            # print(f"current total {t}: ", sim_run_total_time)
 
         logging.info("Time taken by bandit for " + str(self.exp_config.rounds) + " rounds: " + str(sim_run_total_time))
         logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
             sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
         # self.connection.restart_db()
-        print(round_time_list)
+        print(f"round_time_list: {round_time_list}")
+        run_end_time = datetime.datetime.now()
         import numpy as np
-        print((round_time_list[0] - np.array(round_time_list))/round_time_list[0])
-        print(np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0])
-        print(rec_time_list)
-        print(np.mean(rec_time_list))
+        print(f"ir list: {(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
+        print(f"ir mean: {np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
+        print(f"ir max: {np.max(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
+        print(f"rec time list: {rec_time_list}")
+        print(f"rec time mean: {np.mean(rec_time_list)}")
+        print(f"current total {t}: ", (run_end_time - run_start_time).total_seconds())
         return results, sim_run_total_time
 
     def get_query_objs(self, queries_current_batch, t):
@@ -359,6 +364,7 @@ if __name__ == "__main__":
     parser.add_argument('--exp_id', type=str, default='tpch_static_1_MAB')
     parser.add_argument('--variedW_id', type=int, default=0)
     parser.add_argument('--shuffle_flag', type=int, default=0)
+    parser.add_argument('--rounds', type=int, default=0)
     parser.add_argument('--db_type', type=str, default='postgresql')
     args = parser.parse_args()
 
@@ -366,6 +372,7 @@ if __name__ == "__main__":
     db_type = args.db_type
     variedW_id = args.variedW_id
     shuffle_flag = args.shuffle_flag
+    rounds_ow = args.rounds
 
     FROM_FILE = False
     SEPARATE_EXPERIMENTS = True
@@ -379,7 +386,7 @@ if __name__ == "__main__":
 
     if SEPARATE_EXPERIMENTS:
         exp_report_list = []
-    local_exp_config = get_exp_config(exp_id=exp_id, variedW_id=variedW_id)
+    local_exp_config = get_exp_config(exp_id=exp_id, variedW_id=variedW_id, rounds_ow=rounds_ow)
 
     hypo_idx = True if local_exp_config.hypo_idx in ['true', 'True'] else False
     database_name = local_exp_config.database

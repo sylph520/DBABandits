@@ -9,7 +9,7 @@ ExpConf = namedtuple('ExpConf', [
     'hypo_idx',
     'database',
     'reps',
-    'rounds', 'hyp_rounds',
+    'rounds', 'hyp_rounds', 'rep_unit_size',
     'workload_shifts', 'queries_start_list', 'queries_end_list',
     'config_shifts', 'config_start_list', 'config_end_list',
     'ta_runs', 'ta_workload', 'workload_file', 'components', 'mab_versions',
@@ -17,7 +17,7 @@ ExpConf = namedtuple('ExpConf', [
 )
 
 
-def get_exp_config(exp_id='', variedW_id=0):
+def get_exp_config(exp_id='', variedW_id=0, rounds_ow=0):
     # Reading the configuration for given experiment ID
     exp_config = configparser.ConfigParser()
     exp_config.read(constants.ROOT_DIR + constants.EXPERIMENT_CONFIG)
@@ -28,7 +28,7 @@ def get_exp_config(exp_id='', variedW_id=0):
     else:
         experiment_id = exp_config['general']['run_experiment']
     if variedW_id == 0:
-        pass
+        workload_file = str(exp_config[experiment_id]['workload_file'])
     else:
         if variedW_id == 1:  # VW1
             workload_file = '/resources/workloads/VW1.json'
@@ -39,27 +39,40 @@ def get_exp_config(exp_id='', variedW_id=0):
             pass
         else:
             raise ValueError(f"variedW_id {variedW_id} not supported")
-
+    rep_unit_size = int(exp_config[experiment_id]['rep_unit_size'])
+    if not rounds_ow:
+        rounds =  int(exp_config[experiment_id]['rounds'])
+    else:
+        rounds = rounds_ow
+    if rep_unit_size > 0:
+        workload_shifts = list(range(0, rounds-1))
+        queries_start_list = list(range(0, rounds*rep_unit_size, rep_unit_size))
+        queries_end_list = list(range(rep_unit_size, (rounds+1)*rep_unit_size, rep_unit_size))
+    else:
+        workload_shifts = exp_config[experiment_id]['workload_shifts']
+        queries_start_list = json.loads(exp_config[experiment_id]['queries_start'])
+        queries_end_list = json.loads(exp_config[experiment_id]['queries_end'])
     exp_conf_nt = ExpConf(
         experiment_id=experiment_id,
         hypo_idx=exp_config['general']['hypo_idx'],
         database=exp_config[experiment_id]['database'],
         # information about experiment
         reps=int(exp_config[experiment_id]['reps']),
-        rounds=int(exp_config[experiment_id]['rounds']),  # 25
+        rounds=rounds,  # 25
+        rep_unit_size = rep_unit_size,
         hyp_rounds=int(exp_config[experiment_id]['hyp_rounds']),  # 0,
         # e.g., [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
-        workload_shifts=json.loads(exp_config[experiment_id]['workload_shifts']),
+        workload_shifts=workload_shifts,
         # e.g., [0, 21, 42, 63, 84, 105, 126, 147, 168, 189, 210, 231, 252, 273, 294, 315, 336, 357, 378, 399, 420, 441, 462, 483, 504],
-        queries_start_list=json.loads(exp_config[experiment_id]['queries_start']),
+        queries_start_list=queries_start_list,
         # e.g., [21, 42, 63, 84, 105, 126, 147, 168, 189, 210, 231, 252, 273, 294, 315, 336, 357, 378, 399, 420, 441, 462, 483, 504, 525],
-        queries_end_list=json.loads(exp_config[experiment_id]['queries_end']),
+        queries_end_list=queries_end_list,
         config_shifts=json.loads(exp_config[experiment_id]['config_shifts']),
         config_start_list=json.loads(exp_config[experiment_id]['config_start']),
         config_end_list=json.loads(exp_config[experiment_id]['config_end']),
         ta_runs=json.loads(exp_config[experiment_id]['ta_runs']),
         ta_workload=str(exp_config[experiment_id]['ta_workload']),
-        workload_file=str(exp_config[experiment_id]['workload_file']),
+        workload_file=workload_file,
         components=json.loads(exp_config[experiment_id]['components']),
         mab_versions=json.loads(exp_config[experiment_id]['mab_versions']),
         # constraints,

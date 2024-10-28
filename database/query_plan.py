@@ -135,7 +135,9 @@ class QueryPlanPG:
             elif 'Index' in rel_op["Node Type"]:
                 idx_name = rel_op['Index Name']
                 # print(idx_name)
-                if rel_op['Node Type'] in ['Index Scan', 'Index Only Scan']:
+                if '_pkey' in idx_name:
+                    tbl_name = idx_name.split('_pkey')[0].upper()
+                elif rel_op['Node Type'] in ['Index Scan', 'Index Only Scan']:
                     tbl_name = rel_op['Relation Name'].upper()
                 elif rel_op['Node Type'] == 'Bitmap Index Scan':
                     tbl_name = idx_name.split('_')[1].upper()

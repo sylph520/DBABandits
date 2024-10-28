@@ -48,7 +48,7 @@ class DBConnection():
         if 'tpch' in self.database:
             self.benchmark_type = 'TPCH'
         elif 'tpcds' in self.database:
-            self.benchmark_type = 'TCPDS'
+            self.benchmark_type = 'TPCDS'
         elif 'job' in self.database:
             self.benchmark_type = 'JOB'
         elif 'SSB' in self.database:
@@ -399,7 +399,7 @@ class DBConnection():
         :return:
         """
         self.bulk_drop_index(schema_name, arm_list_to_delete)
-        idx_creation_cost_dict = self.bulk_create_indexes(schema_name, arm_list_to_add)
+        cur_round_idx_creation_cost_dict = self.bulk_create_indexes(schema_name, arm_list_to_add)
 
         w_execute_cost = 0
         # dict indexed by index name and map to a tuple indicating benefit and creation cost of the index
@@ -422,22 +422,25 @@ class DBConnection():
             clustered_index_usage = merge_index_use(clustered_index_usage)
 
             for tscan in table_scans:
-                tbl_name = tscan[0]
+                tbl_name = tscan[0].upper()
                 cost = tscan[constants.COST_TYPE_CURRENT_EXECUTION]
                 self.conn_table_scan_time_dict[tbl_name].append(cost)
             # update table_scan_times dict for the query instance and db connection instance from index usages
-            # for index_scan_info in clustered_index_usage:  # fill current_clustered_index_scan_costs
-            #     idx_name = index_scan_info[0]
-            #     table_name = idx_name.split('_')[0]
-            #     cidx_scan_cost = index_scan_info[constants.COST_TYPE_CURRENT_EXECUTION]
-            #     self.conn_cluster_idx_scan_time_dict[table_name].append(cidx_scan_cost)
+            for index_scan_info in clustered_index_usage:  # fill current_clustered_index_scan_costs
+                idx_name = index_scan_info[0]
+                if '_pkey' in idx_name:
+                    table_name = idx_name.split('_pkey')[0].upper()
+                else:
+                    table_name = idx_name.split('_')[1].upper()
+                cidx_scan_cost = index_scan_info[constants.COST_TYPE_CURRENT_EXECUTION]
+                self.conn_cluster_idx_scan_time_dict[table_name].append(cidx_scan_cost)
 
             nc_idx_acccess_table_counts = {}
             for index_use in non_clustered_index_usage:  # for each non_clustered_index usage
                 index_name = index_use[0]
                 table_name = bandit_arm_list[index_name].table_name.upper()
 
-                idx_creation_cost = idx_creation_cost_dict[index_name]
+                # idx_creation_cost = idx_creation_cost_dict[index_name] if index_name in idx_creation_cost_dict else 0.0
                 idx_scan_cost = index_use[constants.COST_TYPE_CURRENT_EXECUTION]
                 self.conn_noncluster_idx_scan_time_dict[table_name].append(idx_scan_cost)
 
@@ -453,17 +456,24 @@ class DBConnection():
                 else:
                     tbl_scan_cost = max(self.conn_noncluster_idx_scan_time_dict[table_name])
                 gain_q_i = tbl_scan_cost - idx_scan_cost
+                # gain_q_i = gain_q_i/nc_idx_acccess_table_counts[table_name]
+                # if table_name in self.conn_cluster_idx_scan_time_dict:
+                #     gain_q_i -= tbl_scan_cost /nc_idx_acccess_table_counts[table_name]
                 # rew = gain_q_i - idx_creation_cost_dict[index_name]
-                if index_name not in arm_reward_dict:  # if first time
-                    arm_reward_dict[index_name] = [gain_q_i, idx_creation_cost]
-                else:
+                if index_name not in arm_reward_dict:  # the index is used but not created from the query
+                    arm_reward_dict[index_name] = [gain_q_i, 0]
+                else:  # the index is used and created from this query
                     arm_reward_dict[index_name][0] += gain_q_i
-                    arm_reward_dict[index_name][1] -= idx_creation_cost
-
-        logging.info(f"Index creation cost: {sum(idx_creation_cost_dict.values())}")
+                    # arm_reward_dict[index_name][1] -= idx_creation_cost
+        for key in cur_round_idx_creation_cost_dict:
+            if key in arm_reward_dict:
+                arm_reward_dict[key][1] += -1*cur_round_idx_creation_cost_dict[key]
+            else:
+                arm_reward_dict[key] = [0, -1*cur_round_idx_creation_cost_dict[key]]
+        logging.info(f"Index creation cost: {sum(cur_round_idx_creation_cost_dict.values())}")
         logging.info(f"Time taken to run the queries: {w_execute_cost} after the configuration change")
 
-        return w_execute_cost, idx_creation_cost_dict, arm_reward_dict
+        return w_execute_cost, cur_round_idx_creation_cost_dict, arm_reward_dict
 
     def hyp_create_index_v1(self, schema_name, tbl_name, col_names,
                             idx_name, include_cols=()):
@@ -1089,7 +1099,7 @@ class DBConnection():
 
             # e.g., {'LINEITEM': {'L_SHIPDATE': 'r'}}
 
-            query_table_selectivity = {t: 0.0 for t in tables}
+            query_table_selectivity = {t.upper(): 0.0 for t in tables}
             if len(query_plan.clustered_index_usage) == 0\
                 and len(query_plan.non_clustered_index_usage) == 0:
                 return query_table_selectivity
@@ -1117,7 +1127,7 @@ class DBConnection():
         if len(index_usage_list) > 0:
             for usage in index_usage_list:
                 idx_name = usage[0]
-                tbl_name = idx_name.split('_')[0].upper()
+                tbl_name = idx_name.split('_pkey')[0].upper()
                 rows_out = usage[-1]
                 rows_in = usage[-2]
                 sel = 1.0 * rows_out / rows_in
@@ -1130,7 +1140,7 @@ class DBConnection():
     def get_sel_list_dict_from_table_scan(self, table_scans: list):
         sel_list_dict: Dict[str, List[float]] = {}
         for table_scan in table_scans:
-            tbl_name = table_scan[0]
+            tbl_name = table_scan[0].upper()
             row_out = table_scan[-1]
             row_in = table_scan[-2]
             sel = 1.0*row_out/row_in
@@ -1315,18 +1325,21 @@ class DBConnection():
 
 
 def transform_hypopg_index_name(hypo_idx_name, arms):
-    if '<' in hypo_idx_name:
-        _split_list = hypo_idx_name.split('>')[1].split('_')[1:]  # e.g., ['lineitem', 'l', 'orderkey', 'l', 'shipmode', 'l', 'receiptdate', 'l', 'shipdate']
-        tbl_name = _split_list[0].upper()
-        # tabled_idx_name = tbl_name + '_' + '_'.join(_split_list[1:])
-        cols_str = '_'.join(_split_list[1:])
-    for arm_name in arms:
-        arm = arms[arm_name]
-        arm_cols_str = ('_'.join(arm.index_cols)).lower()
-        if arm.include_cols:
-            arm_cols_str += '_' + ('_'.join(arm.include_cols)).lower()
-        if arm_cols_str == cols_str:
-            return arm_name
+    for armname in arms:
+        if arms[armname].hypopg_idx_name == hypo_idx_name:
+            return armname
+    # if '<' in hypo_idx_name:
+    #     _split_list = hypo_idx_name.split('>')[1].split('_')[1:]  # e.g., ['lineitem', 'l', 'orderkey', 'l', 'shipmode', 'l', 'receiptdate', 'l', 'shipdate']
+    #     tbl_name = _split_list[0].upper()
+    #     # tabled_idx_name = tbl_name + '_' + '_'.join(_split_list[1:])
+    #     cols_str = '_'.join(_split_list[1:])
+    # for arm_name in arms:
+    #     arm = arms[arm_name]
+    #     arm_cols_str = ('_'.join(arm.index_cols)).lower()
+    #     if arm.include_cols:
+    #         arm_cols_str += '_' + ('_'.join(arm.include_cols)).lower()
+    #     if arm_cols_str == cols_str:
+    #         return arm_name
     """btree_lineitem_l_shipmode_l_partkey_l_quantity_l_shipinstruct_l_disco"""
     raise ValueError(f"no bandits with name similar to {hypo_idx_name}")
 
