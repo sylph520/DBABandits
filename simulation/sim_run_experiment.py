@@ -16,8 +16,12 @@ from shared import helper
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp_ids', nargs='+', default=['tpc_h_static_10_MAB'], help="a list of exp_id")
-    parser.add_argument('--db_type', type=str, default='MSSQL')
+    parser.add_argument('--exp_ids', nargs='+', default=['tpc_h_static_1_MAB'], help="a list of exp_id")
+    parser.add_argument('--variedW_id', type=int, default=0)
+    parser.add_argument('--shuffle_flag', type=int, default=0)
+    parser.add_argument('--rounds', type=int, default=0)
+    parser.add_argument('--db_type', type=str, default='postgresql')
+
     args = parser.parse_args()
 
     exp_id_list = args.exp_ids
@@ -37,11 +41,14 @@ if __name__ == "__main__":
             exp_report_list = []
         exp_id = exp_id_list[i]
         local_exp_config = get_exp_config(exp_id=exp_id)
+        hypo_idx = True if local_exp_config.hypo_idx in ['true', 'True'] else False
         database = local_exp_config.database
         conf_dict = {
             "db_conf": {
                 "db_type": db_type,
-                "database": database},
+                "database": database,
+                "hypo_idx": hypo_idx
+                },
             "exp_conf": local_exp_config
         }
         # Comparing components
