@@ -1,0 +1,49 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "sim_c3ucb_vR",
+            "type": "python",
+            "request": "launch",
+            "program": "simulation/sim_c3ucb_vR.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--exp_id", 
+                "tpch_static_1_MAB",
+                // "tpcds_static_10_MAB",
+                // "tpcds_shifting_1_MAB",
+                "--rounds",
+                // "50",
+                "25",
+            ]
+        },
+        {
+            "name": "sim_ddqn_v3_single_column",
+            "type": "python",
+            "request": "launch",
+            "program": "simulation/sim_ddqn_v3_single_column.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "sim_run_experiment",
+            "type": "python",
+            "request": "launch",
+            "program": "simulation/sim_run_experiment.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
