@@ -1127,7 +1127,20 @@ class DBConnection():
         if len(index_usage_list) > 0:
             for usage in index_usage_list:
                 idx_name = usage[0]
-                tbl_name = idx_name.split('_pkey')[0].upper()
+                if '_pkey' in idx_name:
+                    tbl_name = idx_name.split('_pkey')[0].upper()
+                else:
+                    tbl_name = idx_name.split('_')[1].upper()
+                    if tbl_name == 'WEB':
+                        if 'sales' in idx_name:
+                            tbl_name = 'WEB_SALES'
+                        elif 'returns' in  idx_name:
+                            tbl_name = 'WEB_RETURNS'
+                    elif tbl_name == 'STORE':
+                        if 'sales' in idx_name:
+                            tbl_name = 'STORE_SALES'
+
+                    # tbl_name = idx_name.split('_bree')
                 rows_out = usage[-1]
                 rows_in = usage[-2]
                 sel = 1.0 * rows_out / rows_in

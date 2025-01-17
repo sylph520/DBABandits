@@ -70,10 +70,11 @@ class Simulator(BaseSimulator):
         # logging.info("Logging constants...\n")
         # helper.log_configs(logging, constants)
         # logging.info("Starting MAB...\n")
-
+        bandit_pool = []
         # Create the bandit
         c3ucb_bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
                                      self.exp_config.input_lambda, self.oracle)
+        bandit_pool.append(c3ucb_bandit)
 
         # Running the bandit for T rounds and gather the reward
         run_arm_selection_count = {}

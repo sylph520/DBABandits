@@ -141,6 +141,11 @@ class QueryPlanPG:
                     tbl_name = rel_op['Relation Name'].upper()
                 elif rel_op['Node Type'] == 'Bitmap Index Scan':
                     tbl_name = idx_name.split('_')[1].upper()
+                    if tbl_name == 'WEB':
+                        if 'sales' in idx_name:
+                            tbl_name = 'WEB_SALES'
+                        elif 'returns' in  idx_name:
+                            tbl_name = 'WEB_RETURNS'
                 else:
                     raise NotImplementedError(f"node type {rel_op['Node Type']} not handled yet")
                 # col_names = '_'.join(idx_name.split('_')[2:])
