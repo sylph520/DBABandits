@@ -470,6 +470,12 @@ class DBConnection():
                 arm_reward_dict[key][1] += -1*cur_round_idx_creation_cost_dict[key]
             else:
                 arm_reward_dict[key] = [0, -1*cur_round_idx_creation_cost_dict[key]]
+
+        for arm_name in bandit_arm_list:
+            if arm_name not in arm_reward_dict:
+                arm_reward_dict[arm_name] = [0, 0]
+        assert len(arm_reward_dict) == len(bandit_arm_list)
+
         logging.info(f"Index creation cost: {sum(cur_round_idx_creation_cost_dict.values())}")
         logging.info(f"Time taken to run the queries: {w_execute_cost} after the configuration change")
 

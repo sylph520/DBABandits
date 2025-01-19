@@ -183,9 +183,11 @@ class OracleV7(BaseOracle):
                 arm_ucb_dict = self.reduce_arm_dict_by_selection(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
                 if len(arm_ucb_dict) == 0:
                     break
+        assert len(set(chosen_arm_ids)) == len(chosen_arm_ids)
         return chosen_arm_ids
 
     def reduce_arm_dict_by_selection(self, arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count):
+        arm_ucb_dict.pop(max_ucb_arm_id)
         arm_ucb_dict = self.removed_covered_tables(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
         arm_ucb_dict = self.removed_covered_clusters(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
         arm_ucb_dict = self.removed_covered_queries_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms)

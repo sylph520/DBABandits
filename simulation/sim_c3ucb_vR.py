@@ -6,6 +6,7 @@ import argparse
 import pickle
 from typing import List, Dict
 import numpy
+import numpy as np
 import pandas as pd
 from pandas import DataFrame
 
@@ -19,10 +20,23 @@ from bandits.experiment_report import ExpReport
 from database.query_v5 import Query
 from simulation.base_simulator import BaseSimulator
 
+from bandits.bandit_c3ucb_v2 import C3UCB
+
 
 class Simulator(BaseSimulator):
     def __init__(self, kwargs: dict = ...):
         super().__init__(kwargs)
+        self.bandit_pool: Dict[int, C3UCB] = {}
+        self.delta_1 = 0.1
+        self.delta_2 = 0.1
+        self.dynamic_flag = False if 'dynamic_flag' not in kwargs else kwargs['dynamic_flag']
+
+    def find_armid_from_armlist(self, arm_list: List[BanditArm], idx_name) -> int:
+        for i in range(len(arm_list)):
+            arm = arm_list[i]
+            if arm.index_name == idx_name:
+                return i
+        raise ValueError(f"idx with name {idx_name} not found")
 
     def get_round_query_obj_batch_and_update_query_store(self, queries_current_batch, t):
         query_obj_list_current: List[Query] = []
@@ -59,6 +73,20 @@ class Simulator(BaseSimulator):
             round_index_arms[key].query_ids.add(index_arm.query_id)
             round_index_arms[key].query_ids_backup.add(index_arm.query_id)
 
+    def select_model(self, t) -> C3UCB:
+        if len(self.bandit_pool) == 1:
+            k = list(self.bandit_pool.keys())[0]
+            return self.bandit_pool[k]
+        else:
+            minRejectRateM = min(self.bandit_pool, key=
+                                lambda k: self.bandit_pool[k].get_error_LCB(t+1))
+            return minRejectRateM
+    
+    def get_model_badness(self, model: C3UCB, t: int):
+        tau_prime = model.get_tau_prime(t+1)
+        model_badness = 1.0 * model.reject_accu / tau_prime
+        return model_badness
+
     def run(self):
         pp = pprint.PrettyPrinter()
 
@@ -70,17 +98,15 @@ class Simulator(BaseSimulator):
         # logging.info("Logging constants...\n")
         # helper.log_configs(logging, constants)
         # logging.info("Starting MAB...\n")
-        bandit_pool = []
-        # Create the bandit
-        c3ucb_bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
-                                     self.exp_config.input_lambda, self.oracle)
-        bandit_pool.append(c3ucb_bandit)
-
-        # Running the bandit for T rounds and gather the reward
         run_arm_selection_count = {}
         chosen_arms_last_round = {}
         next_workload_shift = 0
 
+        # init the first bandit
+        bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
+                                     self.exp_config.input_lambda, self.oracle, t=0)
+        self.bandit_pool[bandit.model_id] = bandit
+        
         # next_workload_shift act as the workload id, [query_start, query_end] constitude a workload
         queries_start = self.exp_config.queries_start_list[next_workload_shift]
         queries_end = self.exp_config.queries_end_list[next_workload_shift]
@@ -91,9 +117,14 @@ class Simulator(BaseSimulator):
         round_time_list = []
         rec_time_list = []
         run_start_time = datetime.datetime.now()
+
+        # Running the bandit for T rounds and gather the reward
         for t in range((self.exp_config.rounds + self.exp_config.hyp_rounds)):  # loop through the round batch
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
+
+            bandit_model = self.select_model(t)
+
             # self.dbconn.drop_all_indexes()
             round_start_time = datetime.datetime.now()
             rec_time_start = datetime.datetime.now()
@@ -131,7 +162,7 @@ class Simulator(BaseSimulator):
                 # if the former term > the latter term:
                 workload_change = len(query_obj_additions) / len(query_obj_list_past)
                 # reset or update the bandit weights, v, b
-                c3ucb_bandit.workload_change_trigger(workload_change)
+                bandit_model.workload_change_trigger(workload_change)
 
             # this rounds new will be the additions for the next round
             query_obj_additions = query_obj_list_new
@@ -149,7 +180,7 @@ class Simulator(BaseSimulator):
 
             index_arm_list = list(w_index_arms.values())
             logging.info(f"Generated {len(index_arm_list)} arms")
-            c3ucb_bandit.set_arms(index_arm_list)
+            bandit_model.set_arms(index_arm_list)
 
             context_vectors = self.get_context_vectors_for_arms(w_index_arms, query_obj_list_past, chosen_arms_last_round)
 
@@ -157,10 +188,11 @@ class Simulator(BaseSimulator):
             if t >= self.exp_config.hyp_rounds and t - self.exp_config.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
                 chosen_arm_ids = list(best_super_arm)
             else:
-                chosen_arm_ids = c3ucb_bandit.select_arm_v2(context_vectors)
+                chosen_arm_ids, chosen_id2est_rewards = bandit_model.select_arm_v2(context_vectors)
 
             # get objects for the chosen set of arm ids
             chosen_arms = self.update_choosen_arms_from_ids(chosen_arm_ids, index_arm_list, run_arm_selection_count)
+            chosen_arm_est_rewards_by_id = {i: chosen_id2est_rewards[i] for i in chosen_arm_ids}
 
             # clean everything at start of actual rounds
             if self.exp_config.hyp_rounds != 0 and t == self.exp_config.hyp_rounds:
@@ -189,15 +221,17 @@ class Simulator(BaseSimulator):
             start_time_create_query = datetime.datetime.now()
             # arm_rewards: tuple (gains, creation cost) reward got form playing each arm
             if t < self.exp_config.hyp_rounds:
-                time_taken, creation_cost_dict, arm_rewards = self.dbconn.hyp_create_query_drop_v2(constants.SCHEMA_NAME,
+                time_taken, creation_cost_dict, arm_true_rewards = self.dbconn.hyp_create_query_drop_v2(constants.SCHEMA_NAME,
                                                                                                    chosen_arms, added_arms, deleted_arms,
                                                                                                    query_obj_list_current)
             else:
-                time_taken, creation_cost_dict, arm_rewards = self.dbconn.create_query_drop_v3(constants.SCHEMA_NAME,
+                time_taken, creation_cost_dict, arm_true_rewards = self.dbconn.create_query_drop_v3(constants.SCHEMA_NAME,
                                                                                                chosen_arms, added_arms,
                                                                                                deleted_arms,
                                                                                                query_obj_list_current)
-
+            
+            arm_true_rewards_by_id = {self.find_armid_from_armlist(index_arm_list, arm_name): arm_true_rewards[arm_name][1]\
+                 for arm_name in arm_true_rewards}
             end_time_create_query = datetime.datetime.now()
             idx_creation_cost = sum(creation_cost_dict.values())
 
@@ -207,7 +241,27 @@ class Simulator(BaseSimulator):
                     sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
                 run_arm_selection_count = {}
 
-            c3ucb_bandit.update_v4(chosen_arm_ids, arm_rewards)
+            if self.dynamic_flag:
+                createModelFlag = True
+                cur_bandit_pool = self.bandit_pool.copy()
+                for id, m in cur_bandit_pool.items():
+                    e_t_m = m.model_reject(chosen_arm_est_rewards_by_id, arm_true_rewards_by_id, t)
+                    m.reject_accu += e_t_m
+
+                    avg_reject_rate = self.get_model_badness(m, t)
+                    d_m = m.get_d_t(t)
+                    if avg_reject_rate > self.delta_1 + d_m:  # abandon the model
+                        self.bandit_pool.pop(id)
+                    else:  # update the model
+                        createModelFlag = False
+                        m.update_v4(chosen_arm_ids, arm_true_rewards)
+
+                if len(self.bandit_pool) == 0 or createModelFlag:
+                    # Create the bandit
+                    new_model = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
+                                                 self.exp_config.input_lambda, self.oracle, t)
+                    self.bandit_pool[new_model.model_id] = new_model
+
 
             super_arm_id = frozenset(chosen_arm_ids)
             if t >= self.exp_config.hyp_rounds:
@@ -250,7 +304,6 @@ class Simulator(BaseSimulator):
         # self.connection.restart_db()
         print(f"round_time_list: {round_time_list}")
         run_end_time = datetime.datetime.now()
-        import numpy as np
         print(f"ir list: {(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
         print(f"ir mean: {np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
         print(f"ir max: {np.max(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
@@ -367,6 +420,7 @@ if __name__ == "__main__":
     parser.add_argument('--shuffle_flag', type=int, default=0)
     parser.add_argument('--rounds', type=int, default=0)
     parser.add_argument('--db_type', type=str, default='postgresql')
+    parser.add_argument('--dynamic_flag', action='store_true', default=False)
     args = parser.parse_args()
 
     exp_id = args.exp_id
@@ -374,6 +428,7 @@ if __name__ == "__main__":
     variedW_id = args.variedW_id
     shuffle_flag = args.shuffle_flag
     rounds_ow = args.rounds
+    dynamic_flag = args.dynamic_flag
 
     FROM_FILE = False
     SEPARATE_EXPERIMENTS = True
@@ -396,7 +451,8 @@ if __name__ == "__main__":
             "db_type": db_type,
             "database": database_name,
             "hypo_idx": hypo_idx},
-        "exp_conf": local_exp_config
+        "exp_conf": local_exp_config,
+        "dynamic_flag": dynamic_flag
     }
     experiment_folder_path = helper.get_experiment_folder_path(exp_id)
     if FROM_FILE:

@@ -1,7 +1,9 @@
 import logging
 from abc import abstractmethod
+import itertools
 
 import numpy
+import numpy as np
 
 import constants
 
@@ -29,8 +31,62 @@ class C3UCBBaseBandit:
 
 
 class C3UCB(C3UCBBaseBandit):
-    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle):
+    model_count = itertools.count()
+    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle, t = 0):
         super().__init__(context_size, hyper_alpha, hyper_lambda, oracle)
+        self.model_id = next(C3UCB.model_count)
+        self.round_created = t
+        self.UCB = 0
+        self.LCB = 0
+        self.delta_2 = 0.1
+        self.d = context_size  # the dim of context features
+        self.m = len(self.context_vectors)  # the number of candidate arms
+        self.S = 1  # the magnitude of weight vector
+        self.V_t = self.hyper_lambda * np.eye(self.d)
+        self.reject_accu = 0
+        self.tau = 3
+
+    def get_tau_prime(self, t):
+        tau_prime = min(t + 1 - self.round_created, self.tau)
+        return tau_prime
+
+    def compute_alpah_t(self, t):
+        alpha_t = np.sqrt(self.d * np.log((1 + t * self.m/self.hyper_lambda) / self.delta_2)) + np.sqrt(self.hyper_lambda)*self.S
+        return alpha_t
+
+    def update_V(self, x_t):
+        self.V += np.outer(x_t, x_t)
+
+    def get_d_t(self, t) -> float:
+        tau_prime = self.get_tau_prime(t+1)
+        model_d_t = np.sqrt(0.5 / tau_prime * np.log(1.0 / self.delta_2))
+        return model_d_t
+
+    def get_error_LCB(self, t):
+        model_d_t = self.get_d_t(t)
+        lcb_t = self.reject_accu - np.sqrt(np.log(self.tau)) * model_d_t
+        return lcb_t
+
+    def get_error_UCB(self, id, t):
+        x_t_i = self.context_vectors[id]
+        mahalanobis_distance = np.dot(np.dot(x_t_i.transpose(), np.linalg.inv(self.V_t)), x_t_i)
+        alpha_t = self.compute_alpah_t(t)
+        arm_err_ucb = 2 * alpha_t * mahalanobis_distance
+        return arm_err_ucb
+
+    def get_model_e_hat_t_m(self, t):
+        tau_prime = self.get_tau_prime(t+1)
+        model_badness = 1.0 * self.reject_accu / tau_prime
+        return model_badness
+
+    def model_reject(self, est_rs, true_rs, t) -> int:
+        for i in est_rs:
+            est_r = est_rs[i]
+            true_r = true_rs[i]
+            arm_ucb = self.get_error_UCB(i, t)
+            if (est_r - true_r) > arm_ucb:
+                return 1.0
+        return 0.0
 
     def select_arm(self, context_vectors, current_round):
         pass
@@ -59,7 +115,9 @@ class C3UCB(C3UCBBaseBandit):
 
         logging.debug(self.upper_bounds)
         self.hyper_alpha = self.hyper_alpha / constants.ALPHA_REDUCTION_RATE
-        return self.oracle.get_super_arm(self.upper_bounds, self.arms)
+        chosen_ids = self.oracle.get_super_arm(self.upper_bounds, self.arms)
+        chosen_arm_est_rewards = {id: self.upper_bounds[id] for id in chosen_ids}
+        return chosen_ids, chosen_arm_est_rewards
 
     def update_v4(self, played_arms, arm_rewards):
         """
