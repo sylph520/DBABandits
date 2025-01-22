@@ -27,8 +27,7 @@ class Simulator(BaseSimulator):
     def __init__(self, kwargs: dict = ...):
         super().__init__(kwargs)
         self.bandit_pool: Dict[int, C3UCB] = {}
-        self.delta_1 = 0.1
-        self.delta_2 = 0.1
+        self.delta_1 = 0.01
         self.dynamic_flag = False if 'dynamic_flag' not in kwargs else kwargs['dynamic_flag']
 
     def find_armid_from_armlist(self, arm_list: List[BanditArm], idx_name) -> int:
@@ -187,7 +186,7 @@ class Simulator(BaseSimulator):
             # getting the super arm from the bandit
             if t >= self.exp_config.hyp_rounds and t - self.exp_config.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
                 chosen_arm_ids = list(best_super_arm)
-            else:
+            else:  # use oracle to select arms from the contexts and estimated rewards of arms
                 chosen_arm_ids, chosen_id2est_rewards = bandit_model.select_arm_v2(context_vectors)
 
             # get objects for the chosen set of arm ids
@@ -241,7 +240,7 @@ class Simulator(BaseSimulator):
                     sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
                 run_arm_selection_count = {}
 
-            if self.dynamic_flag:
+            if self.dynamic_flag and len(chosen_arm_ids)>0:
                 createModelFlag = True
                 cur_bandit_pool = self.bandit_pool.copy()
                 for id, m in cur_bandit_pool.items():

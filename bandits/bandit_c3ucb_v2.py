@@ -38,7 +38,7 @@ class C3UCB(C3UCBBaseBandit):
         self.round_created = t
         self.UCB = 0
         self.LCB = 0
-        self.delta_2 = 0.1
+        self.delta_2 = 0.002
         self.d = context_size  # the dim of context features
         self.m = len(self.context_vectors)  # the number of candidate arms
         self.S = 1  # the magnitude of weight vector
