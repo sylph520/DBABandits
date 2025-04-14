@@ -103,7 +103,9 @@ class Simulator(BaseSimulator):
 
         # init the first bandit
         bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
-                                     self.exp_config.input_lambda, self.oracle, t=0)
+                                     self.exp_config.input_lambda, self.oracle, t=0, 
+                                     delta2=self.exp_config.delta2,
+                                     tau=self.exp_config.tau)
         self.bandit_pool[bandit.model_id] = bandit
         
         # next_workload_shift act as the workload id, [query_start, query_end] constitude a workload
@@ -303,9 +305,12 @@ class Simulator(BaseSimulator):
         # self.connection.restart_db()
         print(f"round_time_list: {round_time_list}")
         run_end_time = datetime.datetime.now()
-        print(f"ir list: {(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
-        print(f"ir mean: {np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
-        print(f"ir max: {np.max(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
+        ir_list = (round_time_list[0] - np.array(round_time_list))/round_time_list[0]
+        # print(f"ir list: {ir_list}")
+        if 'static' in self.exp_config.experiment_id:
+            print(f"ir list str: {','.join([str(round(i,3)) for i in ir_list])}")
+        # print(f"ir mean: {np.mean(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
+        # print(f"ir max: {np.max(round_time_list[0] - np.array(round_time_list))/round_time_list[0]}")
         print(f"rec time list: {rec_time_list}")
         print(f"rec time mean: {np.mean(rec_time_list)}")
         print(f"current total {t}: ", (run_end_time - run_start_time).total_seconds())
@@ -420,6 +425,9 @@ if __name__ == "__main__":
     parser.add_argument('--rounds', type=int, default=0)
     parser.add_argument('--db_type', type=str, default='postgresql')
     parser.add_argument('--dynamic_flag', action='store_true', default=False)
+    parser.add_argument('--delta1', type=float, default=0.01)
+    parser.add_argument('--delta2', type=float, default=0.002)
+    parser.add_argument('--tau', type=int, default=3)
     args = parser.parse_args()
 
     exp_id = args.exp_id
@@ -441,7 +449,8 @@ if __name__ == "__main__":
 
     if SEPARATE_EXPERIMENTS:
         exp_report_list = []
-    local_exp_config = get_exp_config(exp_id=exp_id, variedW_id=variedW_id, rounds_ow=rounds_ow)
+    local_exp_config = get_exp_config(exp_id=exp_id, variedW_id=variedW_id, rounds_ow=rounds_ow,
+                delta1=args.delta1, delta2=args.delta2, tau = args.tau)
 
     hypo_idx = True if local_exp_config.hypo_idx in ['true', 'True'] else False
     database_name = local_exp_config.database

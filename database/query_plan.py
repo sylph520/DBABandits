@@ -146,6 +146,43 @@ class QueryPlanPG:
                             tbl_name = 'WEB_SALES'
                         elif 'returns' in  idx_name:
                             tbl_name = 'WEB_RETURNS'
+                        elif 'site' in  idx_name:
+                            tbl_name = 'WEB_SITE'
+                        else:
+                            raise
+                    elif tbl_name == 'STORE':
+                        if 'sales' in idx_name:
+                            tbl_name = 'STORE_SALES'
+                        elif 'returns' in idx_name:
+                            tbl_name = 'STORE_RETURNS'
+                    elif tbl_name == 'CATALOG':
+                        if 'page' in idx_name:
+                            tbl_name = 'CATALOG_PAGE'
+                        elif 'returns' in idx_name:
+                            tbl_name = 'CATALOG_RETURNS'
+                        elif 'sales' in idx_name:
+                            tbl_name = 'CATALOG_SALES'
+                        else:
+                            raise
+                    elif tbl_name  == 'DATE':
+                        tbl_name = 'DATE_DIM'
+                    elif tbl_name == 'CUSTOMER':
+                        if 'address' in idx_name:
+                            tbl_name = 'CUSTOMER_ADDRESS'
+                        elif 'demographics' in idx_name:
+                            tbl_name = 'CUSTOMER_DEMOGRAPHICS'
+                    elif tbl_name == 'TIME':
+                        tbl_name = 'TIME_DIM'
+                    # if tbl_name == 'WEB':
+                    #     if 'web_sales' in idx_name:
+                    #         tbl_name = 'WEB_SALES'
+                    #     elif 'returns' in  idx_name:
+                    #         tbl_name = 'WEB_RETURNS'
+                    # elif tbl_name == 'CATALOG':
+                    #     if 'catalog_sales' in idx_name:
+                    #         tbl_name = 'CATALOG_SALES'
+                    # if tbl_name == 'DATE':
+                    #     tbl_name = 'DATE_DIM'
                 else:
                     raise NotImplementedError(f"node type {rel_op['Node Type']} not handled yet")
                 # col_names = '_'.join(idx_name.split('_')[2:])
@@ -153,7 +190,10 @@ class QueryPlanPG:
                 if tbl_name in num_row_prev:
                     est_op_rows_read = num_row_prev[tbl_name]
                 else:
-                    est_op_rows_read = int(tables_global[tbl_name].table_row_count)
+                    if tbl_name in tables_global:
+                        est_op_rows_read = int(tables_global[tbl_name].table_row_count)
+                    else:
+                        est_op_rows_read = int(tables_global[tbl_name.lower()].table_row_count)
                 est_op_rows_output = rel_op['Plan Rows']
                 num_row_prev[tbl_name] = est_op_rows_output
 

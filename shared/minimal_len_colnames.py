@@ -128,6 +128,8 @@ def get_db_colname_prefixs(dbname, save=True):
         with open(fn, 'rb') as f:
             col_prefix_map = pickle.load(f)
         print(f"{fn} already exists, loaded it")
+        if 'c_last_review_date' not in col_prefix_map and 'c_last_review_date_sk' in col_prefix_map:
+            col_prefix_map['c_last_review_date'] = col_prefix_map['c_last_review_date_sk'] 
         return col_prefix_map
     else:
         # dbname = 'indexselection_tpcds___10'

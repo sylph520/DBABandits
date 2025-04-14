@@ -32,19 +32,35 @@ class C3UCBBaseBandit:
 
 class C3UCB(C3UCBBaseBandit):
     model_count = itertools.count()
-    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle, t = 0):
+    def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle, t = 0,
+             delta2=-1, tau=3):
         super().__init__(context_size, hyper_alpha, hyper_lambda, oracle)
         self.model_id = next(C3UCB.model_count)
         self.round_created = t
         self.UCB = 0
         self.LCB = 0
-        self.delta_2 = 0.002
+        if delta2 == 0.002:
+            self.delta_2 = 0.5
+            self.delta_2 = 0.02
+            # self.delta_2 = 0.002
+            # self.delta_2 = 0.001
+            # self.delta_2 = 0.04
+            # self.delta_2 = 0.001
+            # self.delta_2 = 0.0001
+            # self.delta_2 = 0.00001
+            # self.delta_2 = 0.000001
+            # self.delta_2 = 0.0000001
+            # self.delta_2 = 0.00000001
+        else:
+            self.delta_2 = delta2
         self.d = context_size  # the dim of context features
         self.m = len(self.context_vectors)  # the number of candidate arms
         self.S = 1  # the magnitude of weight vector
         self.V_t = self.hyper_lambda * np.eye(self.d)
         self.reject_accu = 0
-        self.tau = 3
+        # self.tau = 5
+        # self.tau = 10
+        self.tau = tau  # the recent history length
 
     def get_tau_prime(self, t):
         tau_prime = min(t + 1 - self.round_created, self.tau)

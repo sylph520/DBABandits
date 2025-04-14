@@ -13,11 +13,13 @@ ExpConf = namedtuple('ExpConf', [
     'workload_shifts', 'queries_start_list', 'queries_end_list',
     'config_shifts', 'config_start_list', 'config_end_list',
     'ta_runs', 'ta_workload', 'workload_file', 'components', 'mab_versions',
-    'max_memory', 'max_idxnum', 'input_alpha', 'input_lambda']
+    'max_memory', 'max_idxnum', 'input_alpha', 'input_lambda',
+    'delta1', 'delta2', 'tau']
 )
 
 
-def get_exp_config(exp_id='', variedW_id=0, rounds_ow=0):
+def get_exp_config(exp_id='', variedW_id=0, rounds_ow=0,
+                delta1=0.01, delta2=0.002, tau = 3):
     # Reading the configuration for given experiment ID
     exp_config = configparser.ConfigParser()
     exp_config.read(constants.ROOT_DIR + constants.EXPERIMENT_CONFIG)
@@ -52,6 +54,7 @@ def get_exp_config(exp_id='', variedW_id=0, rounds_ow=0):
         workload_shifts = exp_config[experiment_id]['workload_shifts']
         queries_start_list = json.loads(exp_config[experiment_id]['queries_start'])
         queries_end_list = json.loads(exp_config[experiment_id]['queries_end'])
+    
     exp_conf_nt = ExpConf(
         experiment_id=experiment_id,
         hypo_idx=exp_config['general']['hypo_idx'],
@@ -81,6 +84,8 @@ def get_exp_config(exp_id='', variedW_id=0, rounds_ow=0):
         # hyper parameters,
         input_alpha=float(exp_config[experiment_id]['input_alpha']),
         input_lambda=float(exp_config[experiment_id]['input_lambda']),
-
+        delta1 = delta1,
+        delta2 = delta2,
+        tau = tau
     )
     return exp_conf_nt

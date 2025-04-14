@@ -67,7 +67,11 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
 
     for table_name, table_payloads in q_payloads.items():
         if table_name not in predicates:
-            table = tables[table_name]
+            if table_name in tables:
+                table = tables[table_name]
+            else:
+                table = tables[table_name.upper()]
+
             if table.table_row_count < constants.SMALL_TABLE_IGNORE:
                 continue
             col_permutation = table_payloads
