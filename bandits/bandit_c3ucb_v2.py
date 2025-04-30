@@ -33,7 +33,9 @@ class C3UCBBaseBandit:
 class C3UCB(C3UCBBaseBandit):
     model_count = itertools.count()
     def __init__(self, context_size, hyper_alpha, hyper_lambda, oracle, t = 0,
-             delta2=-1, tau=3):
+             delta1=1000000000000000,
+             delta2=-1,
+             tau=3):
         super().__init__(context_size, hyper_alpha, hyper_lambda, oracle)
         self.model_id = next(C3UCB.model_count)
         self.round_created = t
@@ -53,6 +55,7 @@ class C3UCB(C3UCBBaseBandit):
             # self.delta_2 = 0.00000001
         else:
             self.delta_2 = delta2
+        self.delta_1 = delta1
         self.d = context_size  # the dim of context features
         self.m = len(self.context_vectors)  # the number of candidate arms
         self.S = 1  # the magnitude of weight vector

@@ -21,13 +21,13 @@ from database.query_v5 import Query
 from simulation.base_simulator import BaseSimulator
 
 from bandits.bandit_c3ucb_v2 import C3UCB
+# import wandb
 
 
 class Simulator(BaseSimulator):
     def __init__(self, kwargs: dict = ...):
         super().__init__(kwargs)
         self.bandit_pool: Dict[int, C3UCB] = {}
-        self.delta_1 = 0.01
         self.dynamic_flag = False if 'dynamic_flag' not in kwargs else kwargs['dynamic_flag']
 
     def find_armid_from_armlist(self, arm_list: List[BanditArm], idx_name) -> int:
@@ -104,6 +104,7 @@ class Simulator(BaseSimulator):
         # init the first bandit
         bandit = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
                                      self.exp_config.input_lambda, self.oracle, t=0, 
+                                     delta1=self.exp_config.delta1,
                                      delta2=self.exp_config.delta2,
                                      tau=self.exp_config.tau)
         self.bandit_pool[bandit.model_id] = bandit
@@ -251,7 +252,7 @@ class Simulator(BaseSimulator):
 
                     avg_reject_rate = self.get_model_badness(m, t)
                     d_m = m.get_d_t(t)
-                    if avg_reject_rate > self.delta_1 + d_m:  # abandon the model
+                    if avg_reject_rate > m.delta_1 + d_m:  # abandon the model
                         self.bandit_pool.pop(id)
                     else:  # update the model
                         createModelFlag = False
@@ -260,7 +261,10 @@ class Simulator(BaseSimulator):
                 if len(self.bandit_pool) == 0 or createModelFlag:
                     # Create the bandit
                     new_model = bandits.C3UCB(self.context_size, self.exp_config.input_alpha,
-                                                 self.exp_config.input_lambda, self.oracle, t)
+                                                 self.exp_config.input_lambda, self.oracle, t,
+                                                 delta1=self.exp_config.delta1,
+                                                 delta2=self.exp_config.delta2,
+                                                 tau=self.exp_config.tau)
                     self.bandit_pool[new_model.model_id] = new_model
 
 
@@ -304,6 +308,8 @@ class Simulator(BaseSimulator):
             sorted(run_arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
         # self.connection.restart_db()
         print(f"round_time_list: {round_time_list}")
+        print(f"round_time_sum: {sum(round_time_list)}")
+        # wandb.log({'round_time_list': round_time_list, 'round_time_sum': sum(round_time_list)})
         run_end_time = datetime.datetime.now()
         ir_list = (round_time_list[0] - np.array(round_time_list))/round_time_list[0]
         # print(f"ir list: {ir_list}")
@@ -425,10 +431,12 @@ if __name__ == "__main__":
     parser.add_argument('--rounds', type=int, default=0)
     parser.add_argument('--db_type', type=str, default='postgresql')
     parser.add_argument('--dynamic_flag', action='store_true', default=False)
+    parser.add_argument('--lambda', type=float, default=0.5)
     parser.add_argument('--delta1', type=float, default=0.01)
     parser.add_argument('--delta2', type=float, default=0.002)
     parser.add_argument('--tau', type=int, default=3)
     args = parser.parse_args()
+    # wandb.init(project="dlinucb-ablation", config=vars(args))
 
     exp_id = args.exp_id
     db_type = args.db_type
@@ -489,4 +497,4 @@ if __name__ == "__main__":
             exp_report_mab.add_data_list(temp)
 
     # plot line graphs
-    helper.plot_exp_report(local_exp_config.experiment_id, [exp_report_mab], plot_measure)
+    # helper.plot_exp_report(local_exp_config.experiment_id, [exp_report_mab], plot_measure)

@@ -145,6 +145,7 @@ class DBConnection():
                 self.connection.commit()
                 est_hypopg_idx_creation_cost = res2[0][0]["Plan"]['Total Cost']
                 logging.info(f"Added: {idx_name}")
+                est_hypopg_idx_creation_cost = 0
                 return est_hypopg_idx_creation_cost, oid, hypo_idx_name
             else:
                 if include_cols:
@@ -1010,6 +1011,7 @@ class DBConnection():
 
             query = f"CREATE INDEX ON {tbl_name} ({', '.join(col_names)})"
             query = f"SELECT * FROM hypopg_create_index('{query}');"
+            query = self.fix_tsql_to_psql(query)
 
             cursor.execute(query)
             oid = cursor.fetchone()[0]
@@ -1142,9 +1144,33 @@ class DBConnection():
                             tbl_name = 'WEB_SALES'
                         elif 'returns' in  idx_name:
                             tbl_name = 'WEB_RETURNS'
+                        elif 'site' in  idx_name:
+                            tbl_name = 'WEB_SITE'
+                        else:
+                            raise
                     elif tbl_name == 'STORE':
                         if 'sales' in idx_name:
                             tbl_name = 'STORE_SALES'
+                        elif 'returns' in idx_name:
+                            tbl_name = 'STORE_RETURNS'
+                    elif tbl_name == 'CATALOG':
+                        if 'page' in idx_name:
+                            tbl_name = 'CATALOG_PAGE'
+                        elif 'returns' in idx_name:
+                            tbl_name = 'CATALOG_RETURNS'
+                        elif 'sales' in idx_name:
+                            tbl_name = 'CATALOG_SALES'
+                        else:
+                            raise
+                    elif tbl_name  == 'DATE':
+                        tbl_name = 'DATE_DIM'
+                    elif tbl_name == 'CUSTOMER':
+                        if 'address' in idx_name:
+                            tbl_name = 'CUSTOMER_ADDRESS'
+                        elif 'demographics' in idx_name:
+                            tbl_name = 'CUSTOMER_DEMOGRAPHICS'
+                    elif tbl_name == 'TIME':
+                        tbl_name = 'TIME_DIM'
 
                     # tbl_name = idx_name.split('_bree')
                 rows_out = usage[-1]
@@ -1323,6 +1349,8 @@ class DBConnection():
         query2 = sqlglot.transpile(query, read='tsql', write='postgres')[0]
         if 'YEAR(' in query2:
             query2 = re.sub(r'YEAR\((.*?)\)', r'EXTRACT(YEAR FROM \1)', query2)
+
+        query2 = query2.replace('c_last_review_date', 'c_last_review_date_sk')
         return query2
 
     @staticmethod

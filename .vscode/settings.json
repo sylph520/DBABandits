@@ -1,3 +1,4 @@
 {
-    "python.defaultInterpreterPath": "/home/sclai/bin/miniconda3/envs/dbabandits/bin/python"
+    "python.defaultInterpreterPath": "/home/sclai/bin/miniconda3/envs/dbabandits/bin/python",
+    "git.ignoreLimitWarning": true
 }
