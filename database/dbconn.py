@@ -50,7 +50,7 @@ class DBConnection():
         elif 'tpcds' in self.database:
             self.benchmark_type = 'TPCDS'
         elif 'job' in self.database:
-            self.benchmark_type = 'JOB'
+            self.benchmark_type = 'IMDB'
         elif 'SSB' in self.database:
             self.benchmark_type = 'SSB'
         else:
@@ -328,7 +328,8 @@ class DBConnection():
                 cursor.execute("SET STATISTICS XML OFF")
                 query_plan = QueryPlan_MSSQL(stat_xml)
             elif self.db_type == "postgresql":
-                query = self.fix_tsql_to_psql(query)
+                if self.benchmark_type != 'IMDB':
+                    query = self.fix_tsql_to_psql(query)
                 if self.hypo_idx:
                     cursor.execute(f"EXPLAIN (FORMAT JSON) {query}")
                 else:
@@ -1054,7 +1055,10 @@ class DBConnection():
             cursor.execute("SET SHOWPLAN_XML OFF;")
         elif self.db_type == "postgresql":
             cursor = self.connection.cursor()
-            query2 = self.fix_tsql_to_psql(query)
+            if self.benchmark_type != 'IMDB':
+                query2 = self.fix_tsql_to_psql(query)
+            else:
+                query2 = query
             if self.hypo_idx:
                 cursor.execute(f"EXPLAIN (FORMAT JSON) {query2}")
             else:

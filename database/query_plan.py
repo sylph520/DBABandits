@@ -144,9 +144,9 @@ class QueryPlanPG:
                     if tbl_name == 'WEB':
                         if 'sales' in idx_name:
                             tbl_name = 'WEB_SALES'
-                        elif 'returns' in  idx_name:
+                        elif 'returns' in idx_name:
                             tbl_name = 'WEB_RETURNS'
-                        elif 'site' in  idx_name:
+                        elif 'site' in idx_name:
                             tbl_name = 'WEB_SITE'
                         else:
                             raise
@@ -173,6 +173,8 @@ class QueryPlanPG:
                             tbl_name = 'CUSTOMER_DEMOGRAPHICS'
                     elif tbl_name == 'TIME':
                         tbl_name = 'TIME_DIM'
+                    elif tbl_name == 'CAST':
+                        tbl_name = 'CAST_INFO'
                     # if tbl_name == 'WEB':
                     #     if 'web_sales' in idx_name:
                     #         tbl_name = 'WEB_SALES'

@@ -96,14 +96,17 @@ TABLE_SCAN_TIMES = {"SSB": {"customer": [], "dwdate": [], "lineorder": [], "part
                               "ITEM": [], "PROMOTION": [], "REASON": [], "SHIP_MODE": [], "STORE": [],
                               "STORE_RETURNS": [], "STORE_SALES": [], "TIME_DIM": [], "WAREHOUSE": [], "WEB_PAGE": [],
                               "WEB_RETURNS": [], "WEB_SALES": [], "WEB_SITE": []},
-                    "IMDB": {"aka_name": [], "aka_title": [], "cast_info": [], "char_name": [],
-                             "comp_cast_type": [], "company_name": [], "company_type": [], "complete_cast": [],
-                              "info_type": [], "keyword": [], "kind_type": [], "link_type": [],
-                              "movie_companies": [], "movie_info": [], "movie_info_idx": [], "movie_keyword": [], "movie_link": [],
-                              "name": [], "person_info": [], "role_type": [], "title": []}
+                    "IMDB": {"AKA_NAME": [], "AKA_TITLE": [], "CAST_INFO": [], "CHAR_NAME": [],
+                             "COMP_CAST_TYPE": [], "COMPANY_NAME": [], "COMPANY_TYPE": [], "COMPLETE_CAST": [],
+                              "INFO_TYPE": [], "KEYWORD": [], "KIND_TYPE": [], "LINK_TYPE": [],
+                              "MOVIE_COMPANIES": [], "MOVIE_INFO": [], "MOVIE_INFO_IDX": [], "MOVIE_KEYWORD": [], "MOVIE_LINK": [],
+                              "NAME": [], "PERSON_INFO": [], "ROLE_TYPE": [], "TITLE": []}
                     }
 
-tpch_db_colname_prefixs = get_db_colname_prefixs('tpch010', save=True)
-tpcds_db_colname_prefixs = get_db_colname_prefixs('indexselection_tpcds___10', save=True)
-db_colname_prefixs = tpch_db_colname_prefixs.copy()
-db_colname_prefixs.update(tpcds_db_colname_prefixs)
+# tpch_db_colname_prefixs = get_db_colname_prefixs('tpch010', save=True)
+# tpcds_db_colname_prefixs = get_db_colname_prefixs('indexselection_tpcds___10', save=True)
+imdb_job_colname_prefixs = get_db_colname_prefixs('indexselection_job___1', save=True)
+# db_colname_prefixs = tpch_db_colname_prefixs.copy()
+# db_colname_prefixs.update(tpcds_db_colname_prefixs)
+db_colname_prefixs = imdb_job_colname_prefixs
+

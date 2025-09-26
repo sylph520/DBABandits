@@ -4,6 +4,13 @@ import pickle
 from typing import Dict
 
 
+JOB_tbl_abbrev = {"aka_name": 'AN', "aka_title": 'AT', "cast_info": 'CI', "char_name": 'CHN',
+                             "comp_cast_type": 'CCT', "company_name": 'CON', "company_type": 'CT', "complete_cast": 'CC',
+                              "info_type": 'IT', "keyword": 'K', "kind_type": 'KT', "link_type": 'LT',
+                              "movie_companies": 'MC', "movie_info": 'MI', "movie_info_idx": 'MII', "movie_keyword": 'MK', "movie_link": 'ML',
+                              "name": 'N', "person_info": 'PI', "role_type": 'RT', "title": 'T'
+}
+
 def connect_to_db(dbname, port=51204, host='/tmp'):
     conn = psycopg2.connect(database=dbname, port=port, host=host)
     return conn
@@ -36,6 +43,8 @@ def get_db_column_names(conn, dbname):
     db_colnames = []
     for t in table_names:
         tbl_colnames = get_table_column_names(t, cur=cur)
+        if 'job' in dbname:
+            tbl_colnames = [f'{JOB_tbl_abbrev[t]}#' + c for c in tbl_colnames]
         db_colnames.extend(tbl_colnames)
     return db_colnames
 
@@ -121,6 +130,8 @@ def get_db_colname_prefixs(dbname, save=True):
         fn = "tpcds_colname_minprefix.pkl"
     elif 'tpch' in dbname:
         fn = "tpch_colname_minprefix.pkl"
+    elif 'job' in dbname:
+        fn = 'job_colname_minprefix.pkl'
     else:
         raise f"saving file name for database {dbname} not determined"
 
