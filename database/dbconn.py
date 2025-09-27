@@ -14,7 +14,7 @@ import pyodbc
 import sqlglot
 
 import constants
-from database.query_v5 import Query
+from database.query_v5 import Query, get_tblname_from_hypopg_idxname
 from database.query_plan import QueryPlan_MSSQL, QueryPlanPG
 from database.column import Column
 from database.table import Table
@@ -1143,39 +1143,7 @@ class DBConnection():
                     tbl_name = idx_name.split('_pkey')[0].upper()
                 else:
                     tbl_name = idx_name.split('_')[1].upper()
-                    if tbl_name == 'WEB':
-                        if 'sales' in idx_name:
-                            tbl_name = 'WEB_SALES'
-                        elif 'returns' in  idx_name:
-                            tbl_name = 'WEB_RETURNS'
-                        elif 'site' in  idx_name:
-                            tbl_name = 'WEB_SITE'
-                        else:
-                            raise
-                    elif tbl_name == 'STORE':
-                        if 'sales' in idx_name:
-                            tbl_name = 'STORE_SALES'
-                        elif 'returns' in idx_name:
-                            tbl_name = 'STORE_RETURNS'
-                    elif tbl_name == 'CATALOG':
-                        if 'page' in idx_name:
-                            tbl_name = 'CATALOG_PAGE'
-                        elif 'returns' in idx_name:
-                            tbl_name = 'CATALOG_RETURNS'
-                        elif 'sales' in idx_name:
-                            tbl_name = 'CATALOG_SALES'
-                        else:
-                            raise
-                    elif tbl_name  == 'DATE':
-                        tbl_name = 'DATE_DIM'
-                    elif tbl_name == 'CUSTOMER':
-                        if 'address' in idx_name:
-                            tbl_name = 'CUSTOMER_ADDRESS'
-                        elif 'demographics' in idx_name:
-                            tbl_name = 'CUSTOMER_DEMOGRAPHICS'
-                    elif tbl_name == 'TIME':
-                        tbl_name = 'TIME_DIM'
-
+                    tbl_name = get_tblname_from_hypopg_idxname(idx_name, tbl_name)
                     # tbl_name = idx_name.split('_bree')
                 rows_out = usage[-1]
                 rows_in = usage[-2]

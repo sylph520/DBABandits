@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 # from bandits.bandit_arm import BanditArm
 import constants
 # from database.table import Table
-
+from database.query_v5 import get_tblname_from_hypopg_idxname
 
 class QueryPlan_MSSQL:
     def __init__(self, xml_string):
@@ -141,50 +141,7 @@ class QueryPlanPG:
                     tbl_name = rel_op['Relation Name'].upper()
                 elif rel_op['Node Type'] == 'Bitmap Index Scan':
                     tbl_name = idx_name.split('_')[1].upper()
-                    if tbl_name == 'WEB':
-                        if 'sales' in idx_name:
-                            tbl_name = 'WEB_SALES'
-                        elif 'returns' in idx_name:
-                            tbl_name = 'WEB_RETURNS'
-                        elif 'site' in idx_name:
-                            tbl_name = 'WEB_SITE'
-                        else:
-                            raise
-                    elif tbl_name == 'STORE':
-                        if 'sales' in idx_name:
-                            tbl_name = 'STORE_SALES'
-                        elif 'returns' in idx_name:
-                            tbl_name = 'STORE_RETURNS'
-                    elif tbl_name == 'CATALOG':
-                        if 'page' in idx_name:
-                            tbl_name = 'CATALOG_PAGE'
-                        elif 'returns' in idx_name:
-                            tbl_name = 'CATALOG_RETURNS'
-                        elif 'sales' in idx_name:
-                            tbl_name = 'CATALOG_SALES'
-                        else:
-                            raise
-                    elif tbl_name  == 'DATE':
-                        tbl_name = 'DATE_DIM'
-                    elif tbl_name == 'CUSTOMER':
-                        if 'address' in idx_name:
-                            tbl_name = 'CUSTOMER_ADDRESS'
-                        elif 'demographics' in idx_name:
-                            tbl_name = 'CUSTOMER_DEMOGRAPHICS'
-                    elif tbl_name == 'TIME':
-                        tbl_name = 'TIME_DIM'
-                    elif tbl_name == 'CAST':
-                        tbl_name = 'CAST_INFO'
-                    # if tbl_name == 'WEB':
-                    #     if 'web_sales' in idx_name:
-                    #         tbl_name = 'WEB_SALES'
-                    #     elif 'returns' in  idx_name:
-                    #         tbl_name = 'WEB_RETURNS'
-                    # elif tbl_name == 'CATALOG':
-                    #     if 'catalog_sales' in idx_name:
-                    #         tbl_name = 'CATALOG_SALES'
-                    # if tbl_name == 'DATE':
-                    #     tbl_name = 'DATE_DIM'
+                    tbl_name = get_tblname_from_hypopg_idxname(idx_name, tbl_name)
                 else:
                     raise NotImplementedError(f"node type {rel_op['Node Type']} not handled yet")
                 # col_names = '_'.join(idx_name.split('_')[2:])
@@ -216,4 +173,5 @@ class QueryPlanPG:
                 # e.g., hash, hash join, aggregate, gather, gather merge, sort, nested loop, bitmap heap scan, materialize, merge join
                 # print(f"node type is {rel_op['Node Type']}")
                 # print('debug line')
+                # print(rel_op)
                 pass

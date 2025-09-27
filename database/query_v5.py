@@ -38,3 +38,47 @@ class Query:
 
     def get_id(self):
         return self.id
+
+
+def get_tblname_from_hypopg_idxname(idx_name: str, tbl_name: str):
+    if tbl_name == 'WEB':
+        if 'sales' in idx_name:
+            tbl_name = 'WEB_SALES'
+        elif 'returns' in idx_name:
+            tbl_name = 'WEB_RETURNS'
+        elif 'site' in  idx_name:
+            tbl_name = 'WEB_SITE'
+        else:
+            raise
+    elif tbl_name == 'STORE':
+        if 'sales' in idx_name:
+            tbl_name = 'STORE_SALES'
+        elif 'returns' in idx_name:
+            tbl_name = 'STORE_RETURNS'
+    elif tbl_name == 'CATALOG':
+        if 'page' in idx_name:
+            tbl_name = 'CATALOG_PAGE'
+        elif 'returns' in idx_name:
+            tbl_name = 'CATALOG_RETURNS'
+        elif 'sales' in idx_name:
+            tbl_name = 'CATALOG_SALES'
+        else:
+            raise
+    elif tbl_name == 'DATE':
+        tbl_name = 'DATE_DIM'
+    elif tbl_name == 'CUSTOMER':
+        if 'address' in idx_name:
+            tbl_name = 'CUSTOMER_ADDRESS'
+        elif 'demographics' in idx_name:
+            tbl_name = 'CUSTOMER_DEMOGRAPHICS'
+    elif tbl_name == 'TIME':
+        tbl_name = 'TIME_DIM'
+    elif tbl_name == 'MOVIE':
+        idx_cands = ['movie_info_idx', 'movie_info', 'movie_link', 'movie_keyword']
+        for i in idx_cands:
+            if i in idx_name:
+                tbl_name = i.upper()
+        assert '_' in tbl_name, f"{tbl_name}"
+    elif tbl_name == 'CAST':
+        tbl_name = 'CAST_INFO'
+    return tbl_name
