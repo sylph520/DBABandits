@@ -74,11 +74,18 @@ def get_tblname_from_hypopg_idxname(idx_name: str, tbl_name: str):
     elif tbl_name == 'TIME':
         tbl_name = 'TIME_DIM'
     elif tbl_name == 'MOVIE':
-        idx_cands = ['movie_info_idx', 'movie_info', 'movie_link', 'movie_keyword']
+        idx_cands = ['movie_info_idx', 'movie_info', 'movie_link', 'movie_keyword', 'movie_companies']
         for i in idx_cands:
             if i in idx_name:
                 tbl_name = i.upper()
-        assert '_' in tbl_name, f"{tbl_name}"
+        assert '_' in tbl_name, f"{tbl_name}, index name is {idx_name}"
     elif tbl_name == 'CAST':
         tbl_name = 'CAST_INFO'
+    elif tbl_name == 'PERSON':
+        tbl_name = 'PERSON_INFO'
+    elif tbl_name == 'COMPANY':
+        if 'name' in idx_name:
+            tbl_name = 'COMPANY_NAME'
+        else:
+            tbl_name = 'COMPANY_TYPE'
     return tbl_name

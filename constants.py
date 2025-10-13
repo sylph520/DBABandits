@@ -103,10 +103,10 @@ TABLE_SCAN_TIMES = {"SSB": {"customer": [], "dwdate": [], "lineorder": [], "part
                               "NAME": [], "PERSON_INFO": [], "ROLE_TYPE": [], "TITLE": []}
                     }
 
-# tpch_db_colname_prefixs = get_db_colname_prefixs('tpch010', save=True)
-# tpcds_db_colname_prefixs = get_db_colname_prefixs('indexselection_tpcds___10', save=True)
+tpch_db_colname_prefixs = get_db_colname_prefixs('tpch010', save=True)
+tpcds_db_colname_prefixs = get_db_colname_prefixs('indexselection_tpcds___10', save=True)
 imdb_job_colname_prefixs = get_db_colname_prefixs('indexselection_job___1', save=True)
 # db_colname_prefixs = tpch_db_colname_prefixs.copy()
 # db_colname_prefixs.update(tpcds_db_colname_prefixs)
-db_colname_prefixs = imdb_job_colname_prefixs
+# db_colname_prefixs = imdb_job_colname_prefixs
 

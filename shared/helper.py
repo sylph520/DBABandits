@@ -146,8 +146,9 @@ def get_queries_v2(workload_file, db_type='MSSQL') -> list:
         line = f.readline()
         while line:
             line_json = json.loads(line)
-            if db_type != 'postgresql' or line_json['id'] not in [2, 17, 20]:
-                queries.append(line_json)
+            # if db_type != 'postgresql' or line_json['id'] not in [2, 17, 20]:
+            #     queries.append(line_json)
+            queries.append(line_json)
             line = f.readline()
     return queries
 

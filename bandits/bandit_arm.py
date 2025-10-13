@@ -48,11 +48,24 @@ class BanditArm:
     @staticmethod
     def get_arm_str_id(index_cols: List[str], table_name: str, include_cols=(),
             db_type='MSSQL', db_name='indexselection_tpch___1') -> str:
-        db_colname_prefixs = constants.db_colname_prefixs
-        c_prefixs = truncate_colnames([f"{JOB_tbl_abbrev[table_name]}#" + c for c in index_cols], db_colname_prefixs)
+        if 'tpch' in db_name:
+            db_colname_prefixs = constants.tpch_db_colname_prefixs
+        elif 'tpcds' in db_name:
+            db_colname_prefixs = constants.tpcds_db_colname_prefixs
+        elif 'job' in db_name:
+            db_colname_prefixs = constants.imdb_job_colname_prefixs
+
+        if 'job' in db_name:
+            c_prefixs = truncate_colnames([f"{JOB_tbl_abbrev[table_name]}#" + c for c in index_cols], db_colname_prefixs)
+        else:
+            c_prefixs = truncate_colnames(index_cols, db_colname_prefixs)
         indexing_col_names = '_'.join(c_prefixs)
         if include_cols:
-            ic_prefixs = truncate_colnames([f"{JOB_tbl_abbrev[table_name]}#" + c for c in include_cols], db_colname_prefixs)
+            if 'job' in db_name:
+                ic_prefixs = truncate_colnames([f"{JOB_tbl_abbrev[table_name]}#" + c for c in include_cols], db_colname_prefixs)
+            else:
+                ic_prefixs = truncate_colnames(include_cols, db_colname_prefixs)
+
             include_col_names = '_'.join(ic_prefixs)
 
             arm_id = 'IXN_' + table_name + '_' + indexing_col_names + '_' + include_col_names
@@ -73,5 +86,5 @@ def truncate_colnames(colnames, db_colname_prefixs):
             tc = db_colname_prefixs[c].lower()
             tc_cns.append(tc)
         else:
-            raise ValueError(f"column {c} not found in db_colname_prefixs")
+            raise ValueError(f"column {c} not found in {db_colname_prefixs}")
     return tc_cns

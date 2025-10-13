@@ -21,7 +21,8 @@ from database.query_v5 import Query
 from simulation.base_simulator import BaseSimulator
 
 from bandits.bandit_c3ucb_v2 import C3UCB
-# import wandb
+
+import line_profiler
 
 
 class Simulator(BaseSimulator):
@@ -86,7 +87,8 @@ class Simulator(BaseSimulator):
         model_badness = 1.0 * model.reject_accu / tau_prime
         return model_badness
 
-    def run(self):
+    # @line_profiler.profile
+    def run(self, wandb_flag):
         pp = pprint.PrettyPrinter()
 
         results = []
@@ -125,11 +127,11 @@ class Simulator(BaseSimulator):
             # e.g., rounds=25, hyp_rounds=0, t as the round iterator
             logging.info(f"round: {t}")
 
+            rec_time_start = datetime.datetime.now()
             bandit_model = self.select_model(t)
 
             # self.dbconn.drop_all_indexes()
             round_start_time = datetime.datetime.now()
-            rec_time_start = datetime.datetime.now()
             # At the start of the round we will read the applicable set for the current round.
             # This is a workaround used to demo the dynamic query flow.
             # We read the queries from the start and move the window each round
@@ -184,13 +186,18 @@ class Simulator(BaseSimulator):
             logging.info(f"Generated {len(index_arm_list)} arms")
             bandit_model.set_arms(index_arm_list)
 
+            context_start_time = datetime.datetime.now()
             context_vectors = self.get_context_vectors_for_arms(w_index_arms, query_obj_list_past, chosen_arms_last_round)
+            context_end_time = datetime.datetime.now()
+            print(f"context contruct time is {(context_end_time - context_start_time).total_seconds()}")
 
             # getting the super arm from the bandit
             if t >= self.exp_config.hyp_rounds and t - self.exp_config.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
                 chosen_arm_ids = list(best_super_arm)
             else:  # use oracle to select arms from the contexts and estimated rewards of arms
                 chosen_arm_ids, chosen_id2est_rewards = bandit_model.select_arm_v2(context_vectors)
+            rec_time_end = datetime.datetime.now()
+            rec_time_list.append((rec_time_end - rec_time_start).total_seconds())
 
             # get objects for the chosen set of arm ids
             chosen_arms = self.update_choosen_arms_from_ids(chosen_arm_ids, index_arm_list, run_arm_selection_count)
@@ -218,8 +225,6 @@ class Simulator(BaseSimulator):
             for key in key_deletions:
                 deleted_arms[key] = chosen_arms_last_round[key]
 
-            rec_time_end = datetime.datetime.now()
-            rec_time_list.append((rec_time_end - rec_time_start).total_seconds())
             start_time_create_query = datetime.datetime.now()
             # arm_rewards: tuple (gains, creation cost) reward got form playing each arm
             if t < self.exp_config.hyp_rounds:
@@ -309,7 +314,8 @@ class Simulator(BaseSimulator):
         # self.connection.restart_db()
         print(f"round_time_list: {round_time_list}")
         print(f"round_time_sum: {sum(round_time_list)}")
-        # wandb.log({'round_time_list': round_time_list, 'round_time_sum': sum(round_time_list)})
+        if wandb_flag:
+            wandb.log({'round_time_list': round_time_list, 'round_time_sum': sum(round_time_list)})
         run_end_time = datetime.datetime.now()
         ir_list = (round_time_list[0] - np.array(round_time_list))/round_time_list[0]
         # print(f"ir list: {ir_list}")
@@ -435,8 +441,11 @@ if __name__ == "__main__":
     parser.add_argument('--delta1', type=float, default=0.01)
     parser.add_argument('--delta2', type=float, default=0.002)
     parser.add_argument('--tau', type=int, default=3)
+    parser.add_argument('--wandb_flag', action='store_true', default=False)
     args = parser.parse_args()
-    # wandb.init(project="dlinucb-ablation", config=vars(args))
+    if args.wandb_flag:
+        import wandb
+        wandb.init(project="dlinucb-ablation", config=vars(args))
 
     exp_id = args.exp_id
     db_type = args.db_type
@@ -444,6 +453,7 @@ if __name__ == "__main__":
     shuffle_flag = args.shuffle_flag
     rounds_ow = args.rounds
     dynamic_flag = args.dynamic_flag
+    wandb_flag = args.wandb_flag
 
     FROM_FILE = False
     SEPARATE_EXPERIMENTS = True
@@ -487,7 +497,7 @@ if __name__ == "__main__":
         # Running MAB
         for r in range(local_exp_config.reps):
             simulator = Simulator(conf_dict)
-            sim_results, total_workload_time = simulator.run()
+            sim_results, total_workload_time = simulator.run(wandb_flag)
             sim_results.append([-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time])
             temp = DataFrame(sim_results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                    constants.DF_COL_MEASURE_VALUE])

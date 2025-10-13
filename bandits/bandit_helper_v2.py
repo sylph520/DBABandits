@@ -54,7 +54,7 @@ def gen_arms_from_predicates_v2(connection: DBConnection, query_obj: Query):
                 est_idx_size = connection.get_estimated_size_of_index_v1(
                     constants.SCHEMA_NAME, table_name, col_permutation)
                 bandit_arm = BanditArm(col_permutation, table_name, est_idx_size,
-                                       table_row_count, db_type=connection.db_type)
+                                       table_row_count, db_type=connection.db_type, db_name=connection.database)
                 # bandit_arm.query_id = query_id
                 if len(col_permutation) == len(table_predicates):
                     bandit_arm.cluster = table_name + '_' + str(query_id) + '_all'
