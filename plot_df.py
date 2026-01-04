@@ -10,7 +10,8 @@ if __name__ == "__main__":
     parser.add_argument('--exp_id', type=str, default='tpch_static_1_MAB')
     args = parser.parse_args()
 
-    with open('project.pickle', 'rb') as f:
+    with open('tpch_project.pickle', 'rb') as f:
+    # with open('project.pickle', 'rb') as f:
         df = pickle.load(f)
         df['rt_sum'] = df['rt_sum']/(1e7)
         # assert isinstance(df['rt_sum'], float64)
@@ -28,4 +29,4 @@ if __name__ == "__main__":
     pd.plotting.scatter_matrix(df[['lambda', 'delta1', 'tau', 'delta2']],
                                c=df['rt_sum']
                                )
-    # plt.show()
+    plt.show()

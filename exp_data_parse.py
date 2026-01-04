@@ -25,7 +25,7 @@ def parse_float_seqs(fn):
 if __name__ == '__main__':
     # Example usage:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file', type=str, default='rt_ablation_delta2_20250414_144203.txt')
+    parser.add_argument('--file', type=str, default='logs/rt_ablation_delta2_20250414_144203.txt')
     args = parser.parse_args()
 
     # 1. Create a dummy text file for demonstration

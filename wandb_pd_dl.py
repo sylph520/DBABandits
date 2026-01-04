@@ -1,10 +1,15 @@
 import pandas as pd
 import wandb
 import os
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--exp_id', type=str, default='')
+args = parser.parse_args()
 
 api = wandb.Api()
 entity, project = "sylph", "dlinucb-ablation"
-runs = api.runs(entity + "/" + project)
+runs = api.runs(entity + "/" + project, order="+created_at")
 
 pd_rows = []
 for run in runs:
@@ -37,14 +42,37 @@ for run in runs:
 # runs_df = pd.DataFrame(
 #     {"summary": summary_list, "config": config_list, "name": name_list}
 # )
-runs_df = pd.DataFrame(
-   pd_rows
-)
+runs_df = pd.DataFrame(pd_rows)
 
-save_fn = 'project'
-save_fn = 'project3'
-if os.path.exists(save_fn + '.csv') or os.path.exists(save_fn + '.pickle'):
-    raise ValueError(f"{save_fn} already existed, please check")
+# exp_id options
+# {
+#  'tpcds_shifting_1_MAB_80',
+#  'tpch_static_1_MAB',
+#  'job_shifting_1_MAB_80',
+#  'tpch_shifting_1_MAB_80',
+#  'tpcds_random_10_MAB_rep20_round20',
+#  'job_random_1_MAB_rep16_round20',
+#  'job_static_1_MAB',
+#  'tpch_random_1_MAB_rep20_round20',
+#  'tpcds_static_10_MAB'
+#  }
+
+exp_id_to_save = args.exp_id
+__import__('ipdb').set_trace()
+if not exp_id_to_save:
+    save_fn = 'project'
+    save_fn = 'project3'
+    save_fn = 'project5'
+    if os.path.exists(save_fn + '.csv') or os.path.exists(save_fn + '.pickle'):
+        raise ValueError(f"{save_fn} already existed, please check")
+    else:
+        runs_df.to_csv(f"{save_fn}.csv", index=False)
+        runs_df.to_pickle(f"{save_fn}.pickle")
 else:
-    runs_df.to_csv(f"{save_fn}.csv", index=False)
-    runs_df.to_pickle(f"{save_fn}.pickle")
+    runs_df_group = runs_df[runs_df['exp_id'] == exp_id_to_save]
+    save_fn = exp_id_to_save
+    if os.path.exists(save_fn + '.csv') or os.path.exists(save_fn + '.pickle'):
+        raise ValueError(f"{save_fn} already existed, please check")
+    else:
+        runs_df_group.to_csv(f"{save_fn}.csv", index=False)
+        runs_df_group.to_pickle(f"{save_fn}.pickle")

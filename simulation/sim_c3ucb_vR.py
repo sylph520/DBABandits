@@ -189,7 +189,7 @@ class Simulator(BaseSimulator):
             context_start_time = datetime.datetime.now()
             context_vectors = self.get_context_vectors_for_arms(w_index_arms, query_obj_list_past, chosen_arms_last_round)
             context_end_time = datetime.datetime.now()
-            print(f"context contruct time is {(context_end_time - context_start_time).total_seconds()}")
+            # print(f"context contruct time is {(context_end_time - context_start_time).total_seconds()}")
 
             # getting the super arm from the bandit
             if t >= self.exp_config.hyp_rounds and t - self.exp_config.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
@@ -201,6 +201,7 @@ class Simulator(BaseSimulator):
 
             # get objects for the chosen set of arm ids
             chosen_arms = self.update_choosen_arms_from_ids(chosen_arm_ids, index_arm_list, run_arm_selection_count)
+            # print(f"round {t}: chose {chosen_arms}")
             chosen_arm_est_rewards_by_id = {i: chosen_id2est_rewards[i] for i in chosen_arm_ids}
 
             # clean everything at start of actual rounds
@@ -271,6 +272,9 @@ class Simulator(BaseSimulator):
                                                  delta2=self.exp_config.delta2,
                                                  tau=self.exp_config.tau)
                     self.bandit_pool[new_model.model_id] = new_model
+            else:
+                # self.bandit_pool[0].update_v4(chosen_arm_ids, arm_true_rewards)
+                pass
 
 
             super_arm_id = frozenset(chosen_arm_ids)
@@ -443,9 +447,10 @@ if __name__ == "__main__":
     parser.add_argument('--tau', type=int, default=3)
     parser.add_argument('--wandb_flag', action='store_true', default=False)
     args = parser.parse_args()
+    wandb_log_dir = f'/home/sclai/project/DBABandits/wandb_{args.exp_id}'
     if args.wandb_flag:
         import wandb
-        wandb.init(project="dlinucb-ablation", config=vars(args))
+        wandb.init(project="dlinucb-ablation", config=vars(args), dir=wandb_log_dir)
 
     exp_id = args.exp_id
     db_type = args.db_type

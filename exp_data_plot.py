@@ -41,6 +41,7 @@ if __name__ == "__main__":
 
     param_list = args.param_list
 
+    import pdb; pdb.set_trace()
     plist = ast.literal_eval(param_list)
     rt_list = parse_float_seqs(fn)
     # print(rt_list)

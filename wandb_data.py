@@ -1,13 +1,12 @@
 import csv
 import pickle
 import pandas as pd
-import plotly.express as px
 
 if __name__ == "__main__":
     fn = 'project.csv'
     fn = 'project.pickle'
     f_ext = fn.split('.')[1]
-    if f_ext =='csv':
+    if f_ext == 'csv':
         with open(fn, 'r') as f:
             reader = csv.reader(f)
         header = next(reader)
