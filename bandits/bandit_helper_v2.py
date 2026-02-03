@@ -10,6 +10,30 @@ from bandits.bandit_arm import BanditArm
 bandit_arm_store = {}
 
 
+def _get_tables_from_connection(connection):
+    """Get tables from adapter or sql_helper."""
+    if hasattr(connection, 'get_tables') and callable(getattr(connection, 'get_tables')):
+        return connection.get_tables()
+    else:
+        return sql_helper.get_tables(connection)
+
+
+def _estimate_index_size(connection, schema, table, columns):
+    """Estimate index size using adapter or sql_helper."""
+    if hasattr(connection, 'estimate_index_size') and callable(getattr(connection, 'estimate_index_size')):
+        return connection.estimate_index_size(table, tuple(columns))
+    else:
+        return sql_helper.get_estimated_size_of_index_v1(connection, schema, table, columns)
+
+
+def _get_database_size(connection):
+    """Get database size using adapter or sql_helper."""
+    if hasattr(connection, 'get_database_size') and callable(getattr(connection, 'get_database_size')):
+        return connection.get_database_size()
+    else:
+        return sql_helper.get_database_size(connection)
+
+
 def gen_arms_from_predicates_v2(connection, query_obj):
     """
     This method take predicates (a dictionary of lists) as input and creates the generate arms for all possible
@@ -23,7 +47,7 @@ def gen_arms_from_predicates_v2(connection, query_obj):
     predicates = query_obj.predicates
     payloads = query_obj.payload
     query_id = query_obj.id
-    tables = sql_helper.get_tables(connection)
+    tables = _get_tables_from_connection(connection)
     for table_name, table_predicates in predicates.items():
         table = tables[table_name]
         includes = []
@@ -51,8 +75,7 @@ def gen_arms_from_predicates_v2(connection, query_obj):
                 else:
                     bandit_arm.arm_value[query_id] = arm_value
             else:
-                size = sql_helper.get_estimated_size_of_index_v1(connection, constants.SCHEMA_NAME,
-                                                                 table_name, col_permutation)
+                size = _estimate_index_size(connection, constants.SCHEMA_NAME, table_name, col_permutation)
                 bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count)
                 bandit_arm.query_id = query_id
                 if len(col_permutation) == len(table_predicates):
@@ -82,8 +105,7 @@ def gen_arms_from_predicates_v2(connection, query_obj):
                 else:
                     bandit_arm.arm_value[query_id] = arm_value
             else:
-                size = sql_helper.get_estimated_size_of_index_v1(connection, constants.SCHEMA_NAME,
-                                                                 table_name, col_permutation)
+                size = _estimate_index_size(connection, constants.SCHEMA_NAME, table_name, col_permutation)
                 bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count)
                 bandit_arm.query_id = query_id
                 bandit_arm.cluster = table_name + '_' + str(query_id) + '_all'
@@ -108,8 +130,7 @@ def gen_arms_from_predicates_v2(connection, query_obj):
                     table_row_count = table.table_row_count
                     arm_value = (1 - query_obj.selectivity[table_name]) * table_row_count
                     if arm_id_with_include not in bandit_arm_store:
-                        size_with_includes = sql_helper.get_estimated_size_of_index_v1(connection,
-                                                                                       constants.SCHEMA_NAME,
+                        size_with_includes = _estimate_index_size(connection, constants.SCHEMA_NAME,
                                                                                        table_name,
                                                                                        col_permutation + tuple(
                                                                                            includes))
@@ -143,7 +164,7 @@ def gen_arms_from_predicates_single(connection, query_obj):
     bandit_arms = {}
     predicates = query_obj.predicates
     query_id = query_obj.id
-    tables = sql_helper.get_tables(connection)
+    tables = _get_tables_from_connection(connection)
     includes = []
     for table_name, table_predicates in predicates.items():
         table = tables[table_name]
@@ -168,8 +189,7 @@ def gen_arms_from_predicates_single(connection, query_obj):
                 else:
                     bandit_arm.arm_value[query_id] = arm_value
             else:
-                size = sql_helper.get_estimated_size_of_index_v1(connection, constants.SCHEMA_NAME,
-                                                                 table_name, col_permutation)
+                size = _estimate_index_size(connection, constants.SCHEMA_NAME, table_name, col_permutation)
                 bandit_arm = BanditArm(col_permutation, table_name, size, table_row_count)
                 bandit_arm.query_id = query_id
                 if len(col_permutation) == len(table_predicates):
@@ -278,7 +298,13 @@ def get_derived_value_context_vectors_v3(connection, bandit_arm_dict, query_obj_
     :return: list of context vectors
     """
     context_vectors = []
-    database_size = sql_helper.get_database_size(connection)
+    database_size = _get_database_size(connection)
+    # Convert to float to avoid Decimal type issues
+    if hasattr(database_size, 'float_value'):
+        database_size = database_size.float_value
+    else:
+        database_size = float(database_size)
+    
     for key, bandit_arm in bandit_arm_dict.items():
         keys_last_round = set(chosen_arms_last_round.keys())
         if bandit_arm.index_name not in keys_last_round:
