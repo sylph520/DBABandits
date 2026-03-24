@@ -53,7 +53,7 @@ def get_experiment_folder_path(experiment_id):
     :param experiment_id: name of the experiment
     :return: file path as string
     """
-    experiment_folder_path = constants.ROOT_DIR + constants.EXPERIMENT_FOLDER + '\\' + experiment_id + '\\'
+    experiment_folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, experiment_id) + '/'
     if not os.path.exists(experiment_folder_path):
         os.makedirs(experiment_folder_path)
     return experiment_folder_path
@@ -65,7 +65,7 @@ def get_workload_folder_path(experiment_id):
     :param experiment_id: name of the experiment
     :return: file path as string
     """
-    experiment_folder_path = constants.ROOT_DIR + constants.WORKLOADS_FOLDER + '\\' + experiment_id + '\\'
+    experiment_folder_path = os.path.join(constants.ROOT_DIR + constants.WORKLOADS_FOLDER, experiment_id) + '/'
     if not os.path.exists(experiment_folder_path):
         os.makedirs(experiment_folder_path)
     return experiment_folder_path
