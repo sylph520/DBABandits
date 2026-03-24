@@ -17,9 +17,18 @@ db_config.read(constants.ROOT_DIR + constants.DB_CONFIG)
 db_type = db_config['SYSTEM']['db_type']
 database = db_config[db_type]['database']
 
-benchmark_type = database[:-4] # e.g., tpch_010 -> tpch benchmark with 10 Gb data
+BENCHMARK_KEYS = {'ssb', 'tpch', 'tpchskew', 'tpcds', 'imdb'}
+
+def _extract_benchmark_type(database_name: str) -> str:
+    db_lower = database_name.lower()
+    for key in BENCHMARK_KEYS:
+        if key in db_lower:
+            return key.upper()
+    return database_name
+
+benchmark_type = _extract_benchmark_type(database)
 table_scan_times_hyp = copy.deepcopy(constants.TABLE_SCAN_TIMES[benchmark_type])
-table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[database[:-4]])
+table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[benchmark_type])
 
 tables_global = None
 pk_columns_dict = {}
@@ -771,7 +780,7 @@ def remove_all_non_clustered(connection, schema_name):
 
 
 def get_table_scan_times(connection, query_string):
-    query_table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[database])
+    query_table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[_extract_benchmark_type(database)])
     time, index_seeks, clustered_index_scans = execute_query_v1(connection, query_string)
     if clustered_index_scans:
         for index_scan in clustered_index_scans:
@@ -782,7 +791,7 @@ def get_table_scan_times(connection, query_string):
 
 
 def get_table_scan_times_structure():
-    query_table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[database[:-4]])
+    query_table_scan_times = copy.deepcopy(constants.TABLE_SCAN_TIMES[_extract_benchmark_type(database)])
     return query_table_scan_times
 
 
