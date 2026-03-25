@@ -148,13 +148,11 @@ class HypoPGAdapter(PostgreSQLAdapter):
                 cursor = self._connection.cursor()
                 cursor.execute("SELECT hypopg_drop_index(%s)", (index_id,))
                 del self.hypothetical_indexes[index_name]
-                logging.info(f"Dropped hypothetical index {index_name}")
+                logging.debug(f"Dropped hypothetical index {index_name}")
             except Exception as e:
                 logging.error(f"Failed to drop hypothetical index {index_name}: {e}")
-                # Try to drop as real index
-                super().drop_index(table_name, index_name)
+                raise
         else:
-            # Drop as real index
             super().drop_index(table_name, index_name)
     
     def get_query_plan_with_hypothetical_indexes(self, query: str) -> Dict[str, Any]:
