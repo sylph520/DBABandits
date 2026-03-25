@@ -124,7 +124,8 @@ class HypoPGAdapter(PostgreSQLAdapter):
                 index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)})"
             
             # Create hypothetical index using HypoPG
-            cursor.execute("SELECT hypopg_create_index(%s)", (index_def,))
+            # Cast result to record to get proper OID (not string representation)
+            cursor.execute("SELECT (hypopg_create_index(%s)).indexrelid", (index_def,))
             result = cursor.fetchone()
             index_id = result[0]
             
