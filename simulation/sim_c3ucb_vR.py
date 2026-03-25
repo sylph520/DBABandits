@@ -83,7 +83,8 @@ class Simulator(BaseSimulator):
     # Simulator inherit from BaseSimulator (init queries and db connections)
     def run(self):
         pp = pprint.PrettyPrinter()
-        reload(configs)
+        # Note: configs are reloaded in main() before creating Simulator
+        # Do not reload here to preserve CLI overrides
 
         # Check if using PostgreSQL without HypoPG and warn about hyp_rounds
         if self.uses_adapter and configs.hyp_rounds != 0 and not self.hypopg_available:
@@ -496,6 +497,18 @@ Examples:
   
   # Custom connection parameters
   python sim_c3ucb_vR.py --db-type postgresql --db-server myhost --db-name tpch
+  
+  # Override experiment parameters from command line
+  python sim_c3ucb_vR.py --rounds 10 --reps 2 --hyp-rounds 5 --max-memory 50000
+  
+  # Use actual query execution (slower but real metrics)
+  python sim_c3ucb_vR.py --no-optimizer-costs
+  
+  # Custom bandit parameters
+  python sim_c3ucb_vR.py --alpha 2.0 --lambda 0.3
+  
+  # Use specific workload file
+  python sim_c3ucb_vR.py --workload /resources/workloads/tpc_h_static_100_postgresql.json
         """
     )
     
@@ -546,16 +559,52 @@ Examples:
         help='Override experiment ID from config'
     )
     parser.add_argument(
-        '--use-optimizer-costs',
-        action='store_true',
-        default=True,
-        help='Use EXPLAIN optimizer cost estimates instead of actual query execution (default: True for PostgreSQL)'
-    )
-    parser.add_argument(
-        '--use-actual-execution',
+        '--no-optimizer-costs',
         action='store_true',
         default=False,
         help='Use actual query execution instead of optimizer costs (slower but real metrics)'
+    )
+    parser.add_argument(
+        '--hyp-rounds',
+        type=int,
+        default=None,
+        help='Number of hypothetical rounds (HypoPG rounds). Overrides config. Default: from exp.conf'
+    )
+    parser.add_argument(
+        '--rounds',
+        type=int,
+        default=None,
+        help='Number of actual rounds. Overrides config. Default: from exp.conf'
+    )
+    parser.add_argument(
+        '--reps',
+        type=int,
+        default=None,
+        help='Number of repetitions. Overrides config. Default: from exp.conf'
+    )
+    parser.add_argument(
+        '--workload',
+        default=None,
+        help='Workload file path. Overrides config. Default: from exp.conf'
+    )
+    parser.add_argument(
+        '--alpha',
+        type=float,
+        default=None,
+        help='Alpha parameter for C3UCB. Overrides config. Default: from exp.conf'
+    )
+    parser.add_argument(
+        '--lambda',
+        dest='lambda_param',
+        type=float,
+        default=None,
+        help='Lambda parameter for C3UCB. Overrides config. Default: from exp.conf'
+    )
+    parser.add_argument(
+        '--max-memory',
+        type=int,
+        default=None,
+        help='Maximum memory for indexes (MB). Overrides config. Default: from exp.conf'
     )
     
     return parser.parse_args()
@@ -569,10 +618,42 @@ if __name__ == "__main__":
     db_type = args.db_type.lower()
     use_postgres = db_type in ['postgresql', 'postgres']
     
+    # Reload configs first, then override with CLI arguments
+    reload(configs)
+    
     # Override experiment ID if specified
     if args.experiment:
         configs.experiment_id = args.experiment
         print(f"Using experiment ID: {args.experiment}")
+    
+    # Override config values with CLI arguments (applied after reload)
+    if args.hyp_rounds is not None:
+        configs.hyp_rounds = args.hyp_rounds
+        print(f"Using hyp_rounds from CLI: {args.hyp_rounds}")
+    
+    if args.rounds is not None:
+        configs.rounds = args.rounds
+        print(f"Using rounds from CLI: {args.rounds}")
+    
+    if args.reps is not None:
+        configs.reps = args.reps
+        print(f"Using reps from CLI: {args.reps}")
+    
+    if args.workload is not None:
+        configs.workload_file = args.workload
+        print(f"Using workload from CLI: {args.workload}")
+    
+    if args.alpha is not None:
+        configs.input_alpha = args.alpha
+        print(f"Using alpha from CLI: {args.alpha}")
+    
+    if args.lambda_param is not None:
+        configs.input_lambda = args.lambda_param
+        print(f"Using lambda from CLI: {args.lambda_param}")
+    
+    if args.max_memory is not None:
+        configs.max_memory = args.max_memory
+        print(f"Using max_memory from CLI: {args.max_memory}")
     
     # Create database adapter with command line overrides
     if use_postgres:
@@ -633,12 +714,17 @@ if __name__ == "__main__":
                 configs.workload_file = pg_workload
                 print(f"Using PostgreSQL workload: {pg_workload}")
         
-        # Determine execution mode
-        use_optimizer = args.use_optimizer_costs and not args.use_actual_execution
+        # Determine execution mode (--no-optimizer-costs means use real execution)
+        use_optimizer = not args.no_optimizer_costs
         if use_optimizer:
             print("Using optimizer cost estimation mode (EXPLAIN costs, no actual query execution)")
         else:
             print("Using actual query execution mode (slower but real metrics)")
+        
+        # If using real execution, ensure hyp_rounds doesn't conflict
+        if not use_optimizer and configs.hyp_rounds > 0:
+            print(f"Note: hyp_rounds={configs.hyp_rounds} will be applied (HypoPG for exploration)")
+
         
         simulator = Simulator(db_adapter=db, hypopg_available=hypopg_available, use_optimizer_costs=use_optimizer)
     else:
