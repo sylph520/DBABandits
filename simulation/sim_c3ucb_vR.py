@@ -116,12 +116,13 @@ class Simulator(BaseSimulator):
         def _create_query_drop(chosen_arms, added_arms, deleted_arms, queries, t):
             """Create indexes, execute queries, drop indexes - adapter or legacy."""
             if self.uses_adapter:
-                # Use adapter methods
-                # Drop removed indexes
+                # Set hypopg_enabled based on current round - aligns with MSSQL logic
+                if hasattr(self.db, 'hypopg_enabled'):
+                    self.db.hypopg_enabled = (t < configs.hyp_rounds)
+                
                 for index_name, bandit_arm in deleted_arms.items():
                     self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)
                 
-                # Create new indexes
                 creation_cost = {}
                 for index_name, bandit_arm in added_arms.items():
                     cost = self.db.create_index(

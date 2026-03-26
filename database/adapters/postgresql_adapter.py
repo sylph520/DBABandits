@@ -92,16 +92,11 @@ class PostgreSQLAdapter(DatabaseInterface):
         
         cursor = self._connection.cursor()
         
-        # Normalize table and column names to lowercase for PostgreSQL
         table_name_lower = table_name.lower()
         column_names_lower = tuple(col.lower() for col in column_names)
         include_columns_lower = tuple(col.lower() for col in include_columns) if include_columns else ()
         
-        # PostgreSQL syntax differs from MSSQL
-        # No INCLUDE clause - instead use covering index syntax
         if include_columns_lower:
-            # In PostgreSQL, covering indexes work differently
-            # We include all columns in the index key
             all_columns = column_names_lower + include_columns_lower
             query = sql.SQL("CREATE INDEX {} ON {}.{} ({})").format(
                 sql.Identifier(index_name),

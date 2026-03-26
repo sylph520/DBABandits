@@ -105,45 +105,39 @@ class HypoPGAdapter(PostgreSQLAdapter):
             Estimated creation cost (0 for hypothetical indexes)
         """
         if not self.hypopg_enabled:
-            # Fall back to real index creation
             return super().create_index(table_name, column_names, index_name, include_columns)
         
         try:
             cursor = self._connection.cursor()
             
-            # Normalize table and column names to lowercase
             table_name_lower = table_name.lower()
             column_names_lower = tuple(col.lower() for col in column_names)
             include_columns_lower = tuple(col.lower() for col in include_columns) if include_columns else ()
             
-            # Build index definition
             if include_columns_lower:
                 all_columns = column_names_lower + include_columns_lower
                 index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)}) INCLUDE ({', '.join(include_columns_lower)})"
             else:
                 index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)})"
             
-            # Create hypothetical index using HypoPG
-            # Cast result to record to get proper OID (not string representation)
             cursor.execute("SELECT (hypopg_create_index(%s)).indexrelid", (index_def,))
             result = cursor.fetchone()
             index_id = result[0]
             
             self.hypothetical_indexes[index_name] = index_id
-            logging.info(f"Created hypothetical index {index_name} (ID: {index_id})")
+            logging.debug(f"Created hypothetical index {index_name} (ID: {index_id})")
             
-            return 0.0  # No actual creation cost for hypothetical indexes
+            return 0.0
             
         except Exception as e:
             logging.error(f"Failed to create hypothetical index: {e}")
-            # Fall back to regular index
-            return super().create_index(table_name, column_names, index_name, include_columns)
+            raise
     
     def drop_index(self, table_name: str, index_name: str) -> None:
         """
-        Drop a hypothetical or real index.
+        Drop a hypothetical index.
         """
-        if index_name in self.hypothetical_indexes and self.hypopg_enabled:
+        if index_name in self.hypothetical_indexes:
             try:
                 index_id = self.hypothetical_indexes[index_name]
                 cursor = self._connection.cursor()
