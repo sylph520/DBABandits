@@ -572,6 +572,18 @@ Examples:
         help='Number of hypothetical rounds (HypoPG rounds). Overrides config. Default: from exp.conf'
     )
     parser.add_argument(
+        '--real-only',
+        action='store_true',
+        default=False,
+        help='Use only real indexes (no hypothetical). Sets hyp_rounds=0'
+    )
+    parser.add_argument(
+        '--all-hypothetical',
+        action='store_true',
+        default=False,
+        help='Use only hypothetical indexes (all rounds). Sets hyp_rounds=rounds'
+    )
+    parser.add_argument(
         '--rounds',
         type=int,
         default=None,
@@ -635,6 +647,14 @@ if __name__ == "__main__":
     if args.rounds is not None:
         configs.rounds = args.rounds
         print(f"Using rounds from CLI: {args.rounds}")
+    
+    # Apply --real-only and --all-hypothetical shortcuts (after rounds is set)
+    if args.real_only:
+        configs.hyp_rounds = 0
+        print("Using --real-only: All indexes will be real (hyp_rounds=0)")
+    elif args.all_hypothetical:
+        configs.hyp_rounds = configs.rounds
+        print(f"Using --all-hypothetical: All indexes will be hypothetical (hyp_rounds={configs.rounds})")
     
     if args.reps is not None:
         configs.reps = args.reps
