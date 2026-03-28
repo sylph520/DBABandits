@@ -1,29 +1,18 @@
+# IDE
 /.idea/*
+.vscode/settings.json
 
 # Python
 __pycache__/
-*.py[cod]
 *.pyc
-*.so
+*.pyo
 *.egg-info/
-dist/
-build/
-.eggs/
+*.egg
 
-# Virtual environments
-.env
-venv/
-.env/
-.venv/
-
-# IDE
-.vscode/
+# Editor
 *.swp
 *.swo
-
-# Logs
-*.log
-logs/
+*~
 
 # OS
 .DS_Store
