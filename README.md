@@ -24,11 +24,8 @@ python simulation/sim_c3ucb_vR.py --rounds 5 --reps 1 --hyp-rounds 0
 # Real execution mode (slower but accurate metrics)
 python simulation/sim_c3ucb_vR.py --no-optimizer-costs
 
-# Use only real indexes (shortcut for --hyp-rounds 0)
-python simulation/sim_c3ucb_vR.py --real-only
-
-# Use only hypothetical indexes (shortcut for --hyp-rounds rounds)
-python simulation/sim_c3ucb_vR.py --all-hypothetical
+# Use real indexes for rounds phase (default: uses hypothetical in rounds phase)
+python simulation/sim_c3ucb_vR.py --use-real-indexes
 
 # Custom bandit parameters
 python simulation/sim_c3ucb_vR.py --alpha 2.0 --lambda 0.3 --max-memory 50000
@@ -51,8 +48,7 @@ python simulation/sim_c3ucb_vR.py --workload /resources/workloads/tpc_h_static_1
 | `--experiment` | Experiment ID from `config/exp.conf` | from config |
 | `--no-optimizer-costs` | Use actual query execution (vs EXPLAIN costs) | False |
 | `--hyp-rounds` | Number of hypothetical rounds (HypoPG) | from config |
-| `--real-only` | Use only real indexes (no hypothetical) | False |
-| `--all-hypothetical` | Use only hypothetical indexes (all rounds) | False |
+| `--use-real-indexes` | Use real indexes for rounds phase | False (uses hypothetical) |
 | `--rounds` | Number of actual rounds | from config |
 | `--reps` | Number of repetitions | from config |
 | `--workload` | Workload file path | from config |

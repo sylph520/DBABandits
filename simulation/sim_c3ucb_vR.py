@@ -116,9 +116,14 @@ class Simulator(BaseSimulator):
         def _create_query_drop(chosen_arms, added_arms, deleted_arms, queries, t):
             """Create indexes, execute queries, drop indexes - adapter or legacy."""
             if self.uses_adapter:
-                # Set hypopg_enabled based on current round - aligns with MSSQL logic
+                # Set hypopg_enabled based on current round and use_real_indexes_in_rounds flag
+                # - In hyp_rounds phase: always use hypothetical (True)
+                # - In rounds phase: use hypothetical if use_real_indexes_in_rounds is False
                 if hasattr(self.db, 'hypopg_enabled'):
-                    self.db.hypopg_enabled = (t < configs.hyp_rounds)
+                    if t < configs.hyp_rounds:
+                        self.db.hypopg_enabled = True
+                    else:
+                        self.db.hypopg_enabled = not configs.use_real_indexes_in_rounds
                 
                 for index_name, bandit_arm in deleted_arms.items():
                     self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)
@@ -623,16 +628,10 @@ Examples:
         help='Number of hypothetical rounds (HypoPG rounds). Overrides config. Default: from exp.conf'
     )
     parser.add_argument(
-        '--real-only',
+        '--use-real-indexes',
         action='store_true',
         default=False,
-        help='Use only real indexes (no hypothetical). Sets hyp_rounds=0'
-    )
-    parser.add_argument(
-        '--all-hypothetical',
-        action='store_true',
-        default=False,
-        help='Use only hypothetical indexes (all rounds). Sets hyp_rounds=rounds'
+        help='Use real indexes for rounds phase (instead of hypothetical). Default: uses hypothetical'
     )
     parser.add_argument(
         '--rounds',
@@ -699,13 +698,12 @@ if __name__ == "__main__":
         configs.rounds = args.rounds
         print(f"Using rounds from CLI: {args.rounds}")
     
-    # Apply --real-only and --all-hypothetical shortcuts (after rounds is set)
-    if args.real_only:
-        configs.hyp_rounds = 0
-        print("Using --real-only: All indexes will be real (hyp_rounds=0)")
-    elif args.all_hypothetical:
-        configs.hyp_rounds = configs.rounds
-        print(f"Using --all-hypothetical: All indexes will be hypothetical (hyp_rounds={configs.rounds})")
+    # Apply --use-real-indexes flag (default: False, meaning use hypothetical in rounds phase)
+    configs.use_real_indexes_in_rounds = args.use_real_indexes
+    if configs.use_real_indexes_in_rounds:
+        print("Using --use-real-indexes: Rounds phase will use real indexes")
+    else:
+        print("Rounds phase will use hypothetical indexes (default)")
     
     if args.reps is not None:
         configs.reps = args.reps
