@@ -52,11 +52,6 @@ class BaseSimulator:
         """
         self.hypopg_available = hypopg_available
         self.use_optimizer_costs = use_optimizer_costs
-        # configuring the logger
-        logging.basicConfig(
-            filename=helper.get_experiment_folder_path(configs.experiment_id) + configs.experiment_id + '.log',
-            filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
-        logging.getLogger().setLevel(logging.INFO)
 
         # Get the query List
         self.queries = helper.get_queries_v2()
