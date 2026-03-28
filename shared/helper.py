@@ -11,24 +11,25 @@ from pandas import DataFrame
 import constants
 
 
-def plot_histogram(statistics_dict, title, experiment_id):
+def plot_histogram(statistics_dict, title, experiment_id, timestamp=None):
     """
     Simple plot function to plot the average reward, and a line to show the best possible reward
 
     :param statistics_dict: list of statistic histograms
     :param title: title of the plot
     :param experiment_id: id of the current experiment
+    :param timestamp: optional timestamp for the run
     """
     for statistic_name, statistic_histogram in statistics_dict.items():
         plt.plot(statistic_histogram, label=statistic_name)
     plt.title(title)
     plt.xlabel('Rounds')
     plt.legend()
-    plt.savefig(get_experiment_folder_path(experiment_id) + title + '.png')
+    plt.savefig(get_experiment_folder_path(experiment_id, timestamp) + title + '.png')
     plt.show()
 
 
-def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id):
+def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id, timestamp=None):
     """
     Simple plot function to plot the average reward, and a line to show the best possible reward
 
@@ -36,6 +37,7 @@ def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id):
     :param window_size: size of the moving window
     :param title: title of the plot
     :param experiment_id: id of the current experiment
+    :param timestamp: optional timestamp for the run
     """
     crop_amount = int(np.ceil(window_size/2))
     for statistic_name, statistic_histogram in statistics_dict.items():
@@ -43,20 +45,61 @@ def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id):
     plt.title(title)
     plt.xlabel('Rounds')
     plt.legend()
-    plt.savefig(get_experiment_folder_path(experiment_id) + title + '.png')
+    plt.savefig(get_experiment_folder_path(experiment_id, timestamp) + title + '.png')
     plt.show()
 
 
-def get_experiment_folder_path(experiment_id):
+def get_config_folder_path(config_name):
     """
-    Get the folder location of the experiment
-    :param experiment_id: name of the experiment
+    Get the folder location for a specific experiment config (without timestamp).
+    This folder contains timestamped run subdirectories.
+    
+    :param config_name: name of the experiment config (generated from experiment parameters)
     :return: file path as string
     """
-    experiment_folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, experiment_id) + '/'
+    folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, config_name) + '/'
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    return folder_path
+
+
+def get_experiment_folder_path(experiment_id, timestamp=None):
+    """
+    Get the folder location of the experiment run.
+    NOTE: This function uses experiment_id directly. For new folder structure,
+    use get_experiment_run_path() instead.
+    
+    :param experiment_id: name of the experiment (original experiment_id from config)
+    :param timestamp: optional timestamp for the run (format: YYYYMMDD_HHMMSS or YYYYMMDD_HHMMSS_MICROS)
+    :return: file path as string
+    """
+    if timestamp:
+        experiment_folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, experiment_id, timestamp) + '/'
+    else:
+        experiment_folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, experiment_id) + '/'
+    
     if not os.path.exists(experiment_folder_path):
         os.makedirs(experiment_folder_path)
     return experiment_folder_path
+
+
+def get_experiment_run_path(config_folder_name, timestamp=None):
+    """
+    Get the folder location for an experiment run using the config folder name.
+    This is the new folder structure that includes all experiment parameters in the path.
+    
+    :param config_folder_name: full config folder name (e.g., 'exp_id__mode__rounds-25__...')
+    :param timestamp: optional timestamp for the run (format: YYYYMMDD_HHMMSS or YYYYMMDD_HHMMSS_MICROS)
+    :return: file path as string
+    """
+    if timestamp:
+        run_folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, config_folder_name, timestamp) + '/'
+    else:
+        run_folder_path = os.path.join(constants.ROOT_DIR + constants.EXPERIMENT_FOLDER, config_folder_name) + '/'
+    
+    if not os.path.exists(run_folder_path):
+        os.makedirs(run_folder_path)
+    return run_folder_path
 
 
 def get_workload_folder_path(experiment_id):
@@ -71,12 +114,13 @@ def get_workload_folder_path(experiment_id):
     return experiment_folder_path
 
 
-def plot_histogram_avg(statistic_dict, title, experiment_id):
+def plot_histogram_avg(statistic_dict, title, experiment_id, timestamp=None):
     """
-    Simple plot function to plot the average reward, and a line to show the best possible reward
+    Plot the average reward and a line to show the best possible reward
     :param statistic_dict: list of statistic histograms
     :param title: title of the plot
     :param experiment_id: id of the current experiment
+    :param timestamp: optional timestamp for the run
     """
     for statistic_name, statistic_list in statistic_dict.items():
         for i in range(1, len(statistic_list)):
@@ -84,16 +128,17 @@ def plot_histogram_avg(statistic_dict, title, experiment_id):
             statistic_list[i - 1] = statistic_list[i - 1] / i
         statistic_list[len(statistic_list) - 1] = statistic_list[len(statistic_list) - 1] / len(statistic_list)
 
-    plot_histogram(statistic_dict, title, experiment_id)
+    plot_histogram(statistic_dict, title, experiment_id, timestamp)
 
 
-def plot_moving_average(statistic_dict, window_size, title, experiment_id):
+def plot_moving_average(statistic_dict, window_size, title, experiment_id, timestamp=None):
     """
-    Simple plot function to plot the moving average of a histograms
+    Plot the moving average of a histograms
     :param statistic_dict: list of statistic histograms
     :param window_size: size of the moving window
     :param title: title of the plot
     :param experiment_id: id of the current experiment
+    :param timestamp: optional timestamp for the run
     """
     statistic_avg_dict = {}
     for statistic_name, statistic_list in statistic_dict.items():
@@ -101,7 +146,7 @@ def plot_moving_average(statistic_dict, window_size, title, experiment_id):
         statistic_list_avg = np.convolve(statistic_list, avg_mask, 'same')
         statistic_avg_dict[statistic_name] = statistic_list_avg
 
-    plot_histogram_v2(statistic_avg_dict, window_size, title, experiment_id)
+    plot_histogram_v2(statistic_avg_dict, window_size, title, experiment_id, timestamp)
 
 
 def get_queries_v2():
@@ -163,13 +208,15 @@ def update_dict_list(current, new):
     return current
 
 
-def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False):
+def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False, timestamp=None, config_folder_name=None):
     """
     Creates a plot for several experiment reports
     :param exp_id: ID of the experiment
     :param exp_report_list: This can contain several exp report objects
     :param measurement_names: What measurement that we will use for y
     :param log_y: draw y axis in log scale
+    :param timestamp: optional timestamp for the run
+    :param config_folder_name: optional full config folder name (for new folder structure)
     """
     for measurement_name in measurement_names:
         comps = []
@@ -181,22 +228,27 @@ def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False):
             comps.append(exp_report.component_id)
 
         final_df = final_df[final_df[constants.DF_COL_MEASURE_NAME] == measurement_name]
-        # Error style = 'band' / 'bars'
         sns_plot = sns.relplot(x=constants.DF_COL_BATCH, y=constants.DF_COL_MEASURE_VALUE, hue=constants.DF_COL_COMP_ID,
                                kind="line", ci="sd", data=final_df, err_style="band")
         if log_y:
             sns_plot.set(yscale="log")
         plot_title = measurement_name + " Comparison"
         sns_plot.set(xlabel=constants.DF_COL_BATCH, ylabel=measurement_name)
-        sns_plot.savefig(get_experiment_folder_path(exp_id) + plot_title + '.png')
+        
+        if config_folder_name and timestamp:
+            sns_plot.savefig(get_experiment_run_path(config_folder_name, timestamp) + plot_title + '.png')
+        else:
+            sns_plot.savefig(get_experiment_folder_path(exp_id, timestamp) + plot_title + '.png')
 
 
-def create_comparison_tables(exp_id, exp_report_list):
+def create_comparison_tables(exp_id, exp_report_list, timestamp=None, config_folder_name=None):
     """
     Create a CSV with numbers that are important for the comparison
 
     :param exp_id: ID of the experiment
     :param exp_report_list: This can contain several exp report objects
+    :param timestamp: optional timestamp for the run
+    :param config_folder_name: optional full config folder name (for new folder structure)
     :return:
     """
     final_df = DataFrame(
@@ -210,18 +262,19 @@ def create_comparison_tables(exp_id, exp_report_list):
         rounds = exp_report.batches_per_rep
         reps = exp_report.reps
 
-        # Get information from the data frame
         hyp_batch_time = get_avg_measure_value(data, constants.MEASURE_HYP_BATCH_TIME, reps)
         recommend_time = get_avg_measure_value(data, constants.MEASURE_INDEX_RECOMMENDATION_COST, reps)
         creation_time = get_avg_measure_value(data, constants.MEASURE_INDEX_CREATION_COST, reps)
         elapsed_time = get_avg_measure_value(data, constants.MEASURE_QUERY_EXECUTION_COST, reps)
         total_workload_time = get_avg_measure_value(data, constants.MEASURE_BATCH_TIME, reps) + hyp_batch_time
 
-        # Adding to the final data frame
         final_df.loc[len(final_df)] = [component, rounds, hyp_batch_time, recommend_time, creation_time, elapsed_time,
                                        total_workload_time]
 
-    final_df.round(4).to_csv(get_experiment_folder_path(exp_id) + 'comparison_table.csv')
+    if config_folder_name and timestamp:
+        final_df.round(4).to_csv(get_experiment_run_path(config_folder_name, timestamp) + 'comparison_table.csv')
+    else:
+        final_df.round(4).to_csv(get_experiment_folder_path(exp_id, timestamp) + 'comparison_table.csv')
 
 
 # todo - remove min and max

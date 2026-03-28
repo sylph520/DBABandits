@@ -479,6 +479,57 @@ class Simulator(BaseSimulator):
         return results, total_time
 
 
+def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, reps, alpha, lambda_param, workload_file):
+    """
+    Generate a unique config folder name based on experiment parameters.
+    
+    Format: <experiment_id>__<mode>__rounds-<N>__reps-<N>__alpha-<X>__lambda-<Y>__workload-<name>__db-<type>
+    
+    :param experiment_id: base experiment ID from config
+    :param db_type: database type (postgresql, mssql)
+    :param rounds: number of rounds
+    :param hyp_rounds: number of hypothetical rounds
+    :param reps: number of repetitions
+    :param alpha: C3UCB alpha parameter
+    :param lambda_param: C3UCB lambda parameter
+    :param workload_file: workload file path
+    :return: sanitized config folder name
+    """
+    import os
+    
+    def sanitize(s):
+        if s is None:
+            return "none"
+        s = str(s)
+        s = s.replace('/', '_').replace('\\', '_').replace(':', '_')
+        s = s.replace('__', '_')
+        return s
+    
+    def get_index_mode(rounds, hyp_rounds):
+        if hyp_rounds == 0:
+            return "real-only"
+        elif hyp_rounds >= rounds:
+            return "all-hyp"
+        else:
+            return f"mixed-hyp-{hyp_rounds}"
+    
+    workload_name = sanitize(os.path.basename(workload_file).replace('.json', ''))
+    mode = get_index_mode(rounds, hyp_rounds)
+    db = sanitize(db_type)
+    
+    config_name = f"{experiment_id}__{mode}__rounds-{rounds}__reps-{reps}__alpha-{alpha}__lambda-{lambda_param}__workload-{workload_name}__db-{db}"
+    return config_name
+
+
+def get_run_timestamp():
+    """
+    Generate a timestamp for the experiment run.
+    Format: YYYYMMDD_HHMMSS
+    """
+    from datetime import datetime
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 def parse_args():
     """Parse command line arguments."""
     import argparse
@@ -752,8 +803,40 @@ if __name__ == "__main__":
         print(f"Using MSSQL database (legacy mode)")
         simulator = Simulator()
     
+    # Generate experiment config name and timestamp for output folder structure
+    config_folder_name = generate_experiment_config_name(
+        experiment_id=configs.experiment_id,
+        db_type=db_type,
+        rounds=configs.rounds,
+        hyp_rounds=configs.hyp_rounds,
+        reps=configs.reps,
+        alpha=configs.input_alpha,
+        lambda_param=configs.input_lambda,
+        workload_file=configs.workload_file
+    )
+    
+    run_timestamp = get_run_timestamp()
+    
+    # Create config folder (contains all runs with same configuration)
+    config_folder = helper.get_config_folder_path(config_folder_name)
+    print(f"Config folder: {config_folder}")
+    
+    # Create run folder (specific timestamp for this run)
+    run_folder = helper.get_experiment_folder_path(config_folder_name, run_timestamp)
+    print(f"Run folder: {run_folder}")
+    
+    # Update logging to use new path
+    logging.getLogger().handlers = []
+    logging.basicConfig(
+        filename=run_folder + configs.experiment_id + '.log',
+        filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.getLogger().setLevel(logging.INFO)
+    logging.info(f"Experiment config: {config_folder_name}")
+    logging.info(f"CLI args: {vars(args)}")
+    
     # Running MAB
     print(f"\nRunning experiment: {configs.experiment_id}")
+    print(f"Config: {config_folder_name}")
     print(f"Rounds: {configs.rounds}, Reps: {configs.reps}")
     print("-" * 60)
     
@@ -782,8 +865,19 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Generating plots and reports...")
     
-    # plot line graphs
-    helper.plot_exp_report(configs.experiment_id, [exp_report_mab],
-                           (constants.MEASURE_BATCH_TIME, constants.MEASURE_QUERY_EXECUTION_COST))
+    # plot line graphs with timestamp and config folder name
+    helper.plot_exp_report(
+        configs.experiment_id, [exp_report_mab],
+        (constants.MEASURE_BATCH_TIME, constants.MEASURE_QUERY_EXECUTION_COST),
+        timestamp=run_timestamp,
+        config_folder_name=config_folder_name
+    )
     
-    print(f"✓ Experiment complete! Results in: experiments/{configs.experiment_id}/")
+    # create comparison table
+    helper.create_comparison_tables(
+        configs.experiment_id, [exp_report_mab],
+        timestamp=run_timestamp,
+        config_folder_name=config_folder_name
+    )
+    
+    print(f"✓ Experiment complete! Results in: {run_folder}")
