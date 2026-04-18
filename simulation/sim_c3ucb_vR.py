@@ -479,7 +479,7 @@ class Simulator(BaseSimulator):
         return results, total_time
 
 
-def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, reps, alpha, lambda_param, workload_file):
+def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, reps, alpha, lambda_param, workload_file, use_real_indexes=False):
     """
     Generate a unique config folder name based on experiment parameters.
     
@@ -493,6 +493,7 @@ def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, 
     :param alpha: C3UCB alpha parameter
     :param lambda_param: C3UCB lambda parameter
     :param workload_file: workload file path
+    :param use_real_indexes: whether to use real indexes in rounds phase
     :return: sanitized config folder name
     """
     import os
@@ -505,16 +506,23 @@ def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, 
         s = s.replace('__', '_')
         return s
     
-    def get_index_mode(rounds, hyp_rounds):
+    def get_index_mode(rounds, hyp_rounds, use_real_indexes):
+        # Determine exploration mode based on hyp_rounds
         if hyp_rounds == 0:
-            return "real-only"
+            exploration = "no_hyp_explore"
         elif hyp_rounds >= rounds:
-            return "all-hyp"
+            exploration = "all_hyp"
         else:
-            return f"mixed-hyp-{hyp_rounds}"
+            exploration = f"hyp_explore_{hyp_rounds}"
+        
+        # Append _real if using real indexes in rounds phase
+        if use_real_indexes:
+            exploration += "_real"
+        
+        return exploration
     
     workload_name = sanitize(os.path.basename(workload_file).replace('.json', ''))
-    mode = get_index_mode(rounds, hyp_rounds)
+    mode = get_index_mode(rounds, hyp_rounds, use_real_indexes)
     db = sanitize(db_type)
     
     config_name = f"{experiment_id}__{mode}__rounds-{rounds}__reps-{reps}__alpha-{alpha}__lambda-{lambda_param}__workload-{workload_name}__db-{db}"
@@ -805,7 +813,8 @@ if __name__ == "__main__":
         reps=configs.reps,
         alpha=configs.input_alpha,
         lambda_param=configs.input_lambda,
-        workload_file=configs.workload_file
+        workload_file=configs.workload_file,
+        use_real_indexes=configs.use_real_indexes_in_rounds
     )
     
     run_timestamp = get_run_timestamp()
