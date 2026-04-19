@@ -507,15 +507,11 @@ def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, 
         return s
     
     def get_index_mode(rounds, hyp_rounds, use_real_indexes):
-        # Determine exploration mode based on hyp_rounds
         if hyp_rounds == 0:
             exploration = "no_hyp_explore"
-        elif hyp_rounds >= rounds:
-            exploration = "all_hyp"
         else:
             exploration = f"hyp_explore_{hyp_rounds}"
         
-        # Append _real if using real indexes in rounds phase
         if use_real_indexes:
             exploration += "_real"
         
