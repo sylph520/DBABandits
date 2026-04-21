@@ -58,7 +58,11 @@ class C3UCB(C3UCBBaseBandit):
 
         logging.debug(self.upper_bounds)
         self.hyper_alpha = self.hyper_alpha / constants.ALPHA_REDUCTION_RATE
-        return self.oracle.get_super_arm(self.upper_bounds, self.context_vectors, self.arms)
+        # Pass filter flags from configs if available
+        enable_cluster_filter = getattr(self, 'enable_cluster_filter', True)
+        enable_query_overlap_filter = getattr(self, 'enable_query_overlap_filter', True)
+        return self.oracle.get_super_arm(self.upper_bounds, self.context_vectors, self.arms, 
+                           enable_cluster_filter, enable_query_overlap_filter)
 
     def update(self, played_arms, reward, index_use):
         pass
@@ -99,6 +103,23 @@ class C3UCB(C3UCBBaseBandit):
         :return:
         """
         self.arms = bandit_arms
+
+    def set_enable_cluster_filter(self, enable: bool):
+        """
+        Enable or disable cluster-based arm filtering in oracle.
+
+        :param enable: True to enable cluster filtering (default), False to disable
+        """
+        self.enable_cluster_filter = enable
+
+    def set_enable_query_overlap_filter(self, enable: bool):
+        """
+        Enable or disable query_id overlap filtering in oracle.
+        When disabled, allows redundant partial indexes when covering index is selected.
+
+        :param enable: True to enable query overlap filtering (default), False to disable
+        """
+        self.enable_query_overlap_filter = enable
 
     def hard_reset(self):
         """

@@ -64,6 +64,13 @@ def gen_arms_from_predicates_v2(connection, query_obj):
         for col_permutation in col_permutations:
             arm_id = BanditArm.get_arm_id(col_permutation, table_name)
             table_row_count = table.table_row_count
+            # arm_value: Estimated benefit of this index for the query
+            # Formula: (1 - selectivity) * coverage_ratio * table_row_count
+            # - selectivity: fraction of rows returned (higher = worse for indexing)
+            # - coverage_ratio: len(col_permutation) / len(table_predicates)
+            #   = fraction of query predicate columns covered by the index
+            # - table_row_count: size of table
+            # Higher value = more valuable index for this query
             arm_value = (1 - query_obj.selectivity[table_name]) * (
                         len(col_permutation) / len(table_predicates)) * table_row_count
             if arm_id in bandit_arm_store:
@@ -95,6 +102,8 @@ def gen_arms_from_predicates_v2(connection, query_obj):
             col_permutation = table_payloads
             arm_id = BanditArm.get_arm_id(col_permutation, table_name)
             table_row_count = table.table_row_count
+            # arm_value for payload-only (no predicate) tables: minimal estimated value
+            # based on table size; low priority for indexing
             arm_value = 0.001 * table_row_count
             if arm_id in bandit_arm_store:
                 bandit_arm = bandit_arm_store[arm_id]
@@ -215,13 +224,14 @@ def get_predicate_position(arm, predicate, table_name):
     :param table_name: table name
     :return: float [0, 1]
     """
+    predicate_lower = predicate.lower()
     for i in range(len(arm.index_cols)):
-        if table_name == arm.table_name and predicate == arm.index_cols[i]:
+        if table_name == arm.table_name and predicate_lower == arm.index_cols[i].lower():
             return i
     return -1
 
 
-def get_context_vector_v2(bandit_arm, all_columns, context_size, uniqueness=0, includes=False):
+def get_context_vector_v2(bandit_arm: BanditArm, all_columns, context_size, uniqueness=0, includes=False):
     """
     Return the context vector for a given arm, and set of predicates. Size of the context vector will depend on
     the arm and the set of predicates (for now on predicates)
@@ -251,7 +261,7 @@ def get_context_vector_v2(bandit_arm, all_columns, context_size, uniqueness=0, i
                         context_vectors[column_position_in_arm][i] = 1
                     else:
                         left_over_context[i] = 1 / (10 ** column_position_in_arm)
-                elif all_columns[table_name][k] in bandit_arm.include_cols:
+                elif all_columns[table_name][k].lower() in [c.lower() for c in bandit_arm.include_cols]:
                     include_context[i] = 1
                 i += 1
 
@@ -337,9 +347,11 @@ def get_query_context_v1(query_object, all_columns, context_size):
     else:
         i = 0
         for table_name in all_columns:
+            predicates_dict = query_object.predicates.get(table_name, {})
+            predicates_keys_lower = {k.lower(): v for k, v in predicates_dict.items()}
             for k in range(len(all_columns[table_name])):
-                context_vector[i] = 1 if table_name in query_object.predicates and all_columns[table_name][k] in \
-                                         query_object.predicates[table_name] else 0
+                col_lower = all_columns[table_name][k].lower()
+                context_vector[i] = 1 if col_lower in predicates_keys_lower else 0
                 i += 1
         query_object.context = context_vector
     return context_vector

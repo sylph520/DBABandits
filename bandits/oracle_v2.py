@@ -12,7 +12,7 @@ class BaseOracle:
         self.max_memory = max_memory
 
     @abstractmethod
-    def get_super_arm(self, upper_bounds, context_vectors, bandit_arms):
+    def get_super_arm(self, upper_bounds, context_vectors, bandit_arms, enable_cluster_filter=True):
         pass
 
     @staticmethod
@@ -63,14 +63,21 @@ class BaseOracle:
         return reduced_arm_ucb_dict
 
     @staticmethod
-    def removed_covered_clusters(arm_ucb_dict, chosen_id, bandit_arms):
+    def removed_covered_clusters(arm_ucb_dict, chosen_id, bandit_arms, enable_cluster_filter=True):
         """
+        Remove arms that are in the same cluster as the chosen arm.
+        When enable_cluster_filter is False, skip this filtering (allow all covering indexes).
 
         :param arm_ucb_dict: dictionary of arms and upper confidence bounds
         :param chosen_id: chosen arm in this round
         :param bandit_arms: Bandit arm list
+        :param enable_cluster_filter: if False, skip cluster-based filtering
         :return: reduced arm list
         """
+        # If cluster filtering is disabled, return all arms
+        if not enable_cluster_filter:
+            return arm_ucb_dict
+
         reduced_arm_ucb_dict = {}
         for arm_id in arm_ucb_dict:
             if not (bandit_arms[arm_id].table_name == bandit_arms[chosen_id].table_name and bandit_arms[
@@ -80,14 +87,35 @@ class BaseOracle:
         return reduced_arm_ucb_dict
 
     @staticmethod
-    def removed_covered_queries_v2(arm_ucb_dict, chosen_id, bandit_arms):
+    def removed_covered_queries_v2(arm_ucb_dict, chosen_id, bandit_arms, enable_query_overlap_filter=True):
         """
-        When covering index is selected for a query we gonna remove all other arms from that query
+        When a pure covering index (is_include=1) is selected for a query, remove redundant partial indexes.
+        
+        Logic:
+        - If chosen arm has is_include=1 (pure covering, no INCLUDE columns)
+        - For each query_id in chosen arm's query_ids:
+          - Remove that query from other arms on the same table
+        - If an arm ends up with empty query_ids, remove it entirely
+        
+        When enable_query_overlap_filter is False, skip this filtering.
+        
+        Example:
+        - Query 5 has predicates on (c_custkey, c_name)
+        - Arm A: (c_custkey, c_name) - full coverage, is_include=1
+        - Arm B: (c_custkey) - partial coverage
+        - If Arm A is selected, remove query 5 from Arm B's query_ids
+        - Arm B may become empty and be removed
+        
         :param arm_ucb_dict: dictionary of arms and upper confidence bounds
         :param chosen_id: chosen arm in this round
         :param bandit_arms: Bandit arm list
+        :param enable_query_overlap_filter: if False, skip query overlap filtering
         :return: reduced arm list
         """
+        # If query overlap filtering is disabled, return all arms
+        if not enable_query_overlap_filter:
+            return arm_ucb_dict
+
         reduced_arm_ucb_dict = {}
         for arm_id in arm_ucb_dict:
             query_ids = bandit_arms[chosen_id].query_ids
@@ -141,7 +169,7 @@ class BaseOracle:
 
 class OracleV7(BaseOracle):
 
-    def get_super_arm(self, upper_bounds, context_vectors, bandit_arms):
+    def get_super_arm(self, upper_bounds, context_vectors, bandit_arms, enable_cluster_filter=True, enable_query_overlap_filter=True):
         used_memory = 0
         chosen_arms = []
         arm_ucb_dict = {}
@@ -162,8 +190,8 @@ class OracleV7(BaseOracle):
                 else:
                     table_count[bandit_arms[max_ucb_arm_id].table_name] = 1
                 arm_ucb_dict = self.removed_covered_tables(arm_ucb_dict, max_ucb_arm_id, bandit_arms, table_count)
-                arm_ucb_dict = self.removed_covered_clusters(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
-                arm_ucb_dict = self.removed_covered_queries_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms)
+                arm_ucb_dict = self.removed_covered_clusters(arm_ucb_dict, max_ucb_arm_id, bandit_arms, enable_cluster_filter)
+                arm_ucb_dict = self.removed_covered_queries_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms, enable_query_overlap_filter)
                 arm_ucb_dict = self.removed_covered_v2(arm_ucb_dict, max_ucb_arm_id, bandit_arms,
                                                        self.max_memory - used_memory)
                 arm_ucb_dict = self.removed_same_prefix(arm_ucb_dict, max_ucb_arm_id, bandit_arms, 1)

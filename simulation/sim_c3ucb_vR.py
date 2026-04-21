@@ -33,6 +33,28 @@ from bandits.query_v5 import Query
 from database import create_db_adapter_from_config, DatabaseInterface
 
 
+def _is_debugging():
+    """Auto-detect if running in debugger (VSCode, PyCharm, etc.)"""
+    import sys
+    import os
+
+    if sys.flags.debug:
+        return True
+
+    if sys.gettrace() is not None:
+        return True
+
+    debug_env_vars = [
+        'VSCODE_DEBUGGING', 'PYTHONDEBUGPY', 'DEBUGPY',
+        'PYDEVD', 'PYCHARM_DEBUG'
+    ]
+    for var in debug_env_vars:
+        if os.environ.get(var):
+            return True
+
+    return False
+
+
 # Simulation built on vQ to collect the super arm performance
 # Now supports both MSSQL and PostgreSQL via database abstraction layer
 
@@ -260,6 +282,8 @@ class Simulator(BaseSimulator):
         configs.max_memory -= int(_get_current_pds_size())
         oracle = Oracle(configs.max_memory)
         c3ucb_bandit = bandits.C3UCB(context_size, configs.input_alpha, configs.input_lambda, oracle)
+        c3ucb_bandit.set_enable_cluster_filter(configs.enable_cluster_filter)
+        c3ucb_bandit.set_enable_query_overlap_filter(configs.enable_query_overlap_filter)
 
         # Running the bandit for T rounds and gather the reward
         arm_selection_count = {}
@@ -331,6 +355,8 @@ class Simulator(BaseSimulator):
                 elif obj.first_seen_round == t:  # new seen in the current round
                     query_obj_list_new.append(obj)
 
+            logging.debug(f"Round {t}: new queries={len(query_obj_list_new)}, past queries={len(query_obj_list_past)}")
+
             # We don't want to reset in the first round,
             # if there is new additions or removals we identify a workload change
             if t > 0 and len(query_obj_additions) > 0:  # Have seen new query in previous round
@@ -342,64 +368,72 @@ class Simulator(BaseSimulator):
             # this rounds new will be the additions for the next round
             query_obj_additions = query_obj_list_new
 
-            # Get the predicates for queries and Generate index arms for each query
-            index_arms = {}
-            for i in range(len(query_obj_list_past)):  # for each previously seen query
-                bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(_get_db_connection(), query_obj_list_past[i])
-                for key, index_arm in bandit_arms_tmp.items():
-                    if key not in index_arms:
-                        index_arm.query_ids = set()
-                        index_arm.query_ids_backup = set()
-                        index_arm.clustered_index_time = 0
-                        index_arms[key] = index_arm
-                    index_arm.clustered_index_time += max(
-                        query_obj_list_past[i].table_scan_times[index_arm.table_name]) if \
-                        query_obj_list_past[i].table_scan_times[index_arm.table_name] else 0
-                    index_arms[key].query_ids.add(index_arm.query_id)
-                    index_arms[key].query_ids_backup.add(index_arm.query_id)
-
-            # set the index arms at the bandit
-            if t == configs.hyp_rounds and configs.hyp_rounds != 0:
-                index_arms = {}
-            index_arm_list = list(index_arms.values())
-            logging.info(f"Generated {len(index_arm_list)} arms")
-            c3ucb_bandit.set_arms(index_arm_list)
-
-            # creating the context, here we pass all the columns in the database
-            context_vectors_v1 = bandit_helper.get_name_encode_context_vectors_v2(index_arms, all_columns,
-                                                                                  number_of_columns,
-                                                                                  constants.CONTEXT_UNIQUENESS,
-                                                                                  constants.CONTEXT_INCLUDES)
-            context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(_get_db_connection(), index_arms, query_obj_list_past,
-                                                                                        chosen_arms_last_round, not constants.CONTEXT_INCLUDES)
-            context_vectors = []
-            for i in range(len(context_vectors_v1)):
-                context_vectors.append(
-                    numpy.array(list(context_vectors_v2[i]) + list(context_vectors_v1[i]),
-                                ndmin=2))
-            # getting the super arm from the bandit
-            chosen_arm_ids = c3ucb_bandit.select_arm_v2(context_vectors, t)
-            if t >= configs.hyp_rounds and t - configs.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
-                chosen_arm_ids = list(best_super_arm)
-
-            # get objects for the chosen set of arm ids
-            chosen_arms = {}
-            used_memory = 0
-            if chosen_arm_ids:
+            # Skip arm generation if no past queries (first round or no history)
+            if len(query_obj_list_past) == 0:
+                logging.info(f"Round {t}: No past queries ({len(query_obj_list_new)} new), skipping arm selection")
+                # Still execute queries but skip index recommendations
+                index_arm_list = []
+                chosen_arm_ids = []
                 chosen_arms = {}
-                for arm in chosen_arm_ids:
-                    index_name = index_arm_list[arm].index_name
-                    chosen_arms[index_name] = index_arm_list[arm]
-                    used_memory = used_memory + index_arm_list[arm].memory
-                    if index_name in arm_selection_count:
-                        arm_selection_count[index_name] += 1
-                    else:
-                        arm_selection_count[index_name] = 1
+            else:
+                # Get the predicates for queries and Generate index arms for each query
+                index_arms = {}
+                for i in range(len(query_obj_list_past)):  # for each previously seen query
+                    bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(_get_db_connection(), query_obj_list_past[i])
+                    for key, index_arm in bandit_arms_tmp.items():
+                        if key not in index_arms:
+                            index_arm.query_ids = set()
+                            index_arm.query_ids_backup = set()
+                            index_arm.clustered_index_time = 0
+                            index_arms[key] = index_arm
+                        index_arm.clustered_index_time += max(
+                            query_obj_list_past[i].table_scan_times[index_arm.table_name]) if \
+                            query_obj_list_past[i].table_scan_times[index_arm.table_name] else 0
+                        index_arms[key].query_ids.add(index_arm.query_id)
+                        index_arms[key].query_ids_backup.add(index_arm.query_id)
 
-            # clean everything at start of actual rounds
-            if configs.hyp_rounds != 0 and t == configs.hyp_rounds:
-                _bulk_drop_index(chosen_arms_last_round)
-                chosen_arms_last_round = {}
+                # set the index arms at the bandit
+                if t == configs.hyp_rounds and configs.hyp_rounds != 0:
+                    index_arms = {}
+                index_arm_list = list(index_arms.values())
+                logging.info(f"Generated {len(index_arm_list)} arms: {[a.index_name for a in index_arm_list]}")
+                c3ucb_bandit.set_arms(index_arm_list)
+
+                # creating the context, here we pass all the columns in the database
+                context_vectors_v1 = bandit_helper.get_name_encode_context_vectors_v2(index_arms, all_columns,
+                                                                              number_of_columns,
+                                                                              constants.CONTEXT_UNIQUENESS,
+                                                                              constants.CONTEXT_INCLUDES)
+                context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(_get_db_connection(), index_arms, query_obj_list_past,
+                                                                              chosen_arms_last_round, not constants.CONTEXT_INCLUDES)
+                context_vectors = []
+                for i in range(len(context_vectors_v1)):
+                    context_vectors.append(
+                        numpy.array(list(context_vectors_v2[i]) + list(context_vectors_v1[i]),
+                                    ndmin=2))
+                # getting the super arm from the bandit
+                chosen_arm_ids = c3ucb_bandit.select_arm_v2(context_vectors, t)
+                if t >= configs.hyp_rounds and t - configs.hyp_rounds > constants.STOP_EXPLORATION_ROUND:
+                    chosen_arm_ids = list(best_super_arm)
+
+                # get objects for the chosen set of arm ids
+                chosen_arms = {}
+                used_memory = 0
+                if chosen_arm_ids:
+                    chosen_arms = {}
+                    for arm in chosen_arm_ids:
+                        index_name = index_arm_list[arm].index_name
+                        chosen_arms[index_name] = index_arm_list[arm]
+                        used_memory = used_memory + index_arm_list[arm].memory
+                        if index_name in arm_selection_count:
+                            arm_selection_count[index_name] += 1
+                        else:
+                            arm_selection_count[index_name] = 1
+
+                # clean everything at start of actual rounds
+                if configs.hyp_rounds != 0 and t == configs.hyp_rounds:
+                    _bulk_drop_index(chosen_arms_last_round)
+                    chosen_arms_last_round = {}
 
             # finding the difference between last round and this round
             keys_last_round = set(chosen_arms_last_round.keys())
@@ -422,23 +456,34 @@ class Simulator(BaseSimulator):
             time_taken, creation_cost_dict, arm_rewards = _create_query_drop(chosen_arms, added_arms, deleted_arms, query_obj_list_current, t)
             end_time_create_query = datetime.datetime.now()
             creation_cost = sum(creation_cost_dict.values())
+            index_config = {
+                'selected': list(keys_this_round),
+                'added': list(key_additions),
+                'deleted': list(key_deletions),
+                'total_memory_mb': sum(a.memory for a in chosen_arms.values()) if chosen_arms else 0
+            }
+            logging.info(f"Round {t}: execute_cost={time_taken:.2f}s, creation_cost={creation_cost:.2f}s, "
+                         f"indexes={index_config}, rewards={arm_rewards}")
             if t == configs.hyp_rounds and configs.hyp_rounds != 0:
                 # logging arm usage counts
                 logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
                     sorted(arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
                 arm_selection_count = {}
 
-            c3ucb_bandit.update_v4(chosen_arm_ids, arm_rewards)
-            super_arm_id = frozenset(chosen_arm_ids)
-            if t >= configs.hyp_rounds:
-                if super_arm_id in super_arm_scores:
-                    super_arm_scores[super_arm_id] = super_arm_scores[super_arm_id] * super_arm_counts[super_arm_id] \
-                                                     + time_taken
-                    super_arm_counts[super_arm_id] += 1
-                    super_arm_scores[super_arm_id] /= super_arm_counts[super_arm_id]
-                else:
-                    super_arm_counts[super_arm_id] = 1
-                    super_arm_scores[super_arm_id] = time_taken
+            # Skip bandit update if no arms were selected
+            if len(chosen_arm_ids) > 0:
+                c3ucb_bandit.update_v4(chosen_arm_ids, arm_rewards)
+                logging.debug(f"Round {t}: arm_rewards={arm_rewards}, chosen_arm_ids={chosen_arm_ids}")
+                super_arm_id = frozenset(chosen_arm_ids)
+                if t >= configs.hyp_rounds:
+                    if super_arm_id in super_arm_scores:
+                        super_arm_scores[super_arm_id] = super_arm_scores[super_arm_id] * super_arm_counts[super_arm_id] \
+                                                         + time_taken
+                        super_arm_counts[super_arm_id] += 1
+                        super_arm_scores[super_arm_id] /= super_arm_counts[super_arm_id]
+                    else:
+                        super_arm_counts[super_arm_id] = 1
+                        super_arm_scores[super_arm_id] = time_taken
 
             # keeping track of queries that we saw last time
             chosen_arms_last_round = chosen_arms
@@ -467,7 +512,7 @@ class Simulator(BaseSimulator):
                 results.append([t, constants.MEASURE_HYP_BATCH_TIME, total_round_time])
             total_time += total_round_time
 
-            if t >= configs.hyp_rounds:
+            if t >= configs.hyp_rounds and super_arm_scores:
                 best_super_arm = min(super_arm_scores, key=super_arm_scores.get)
 
             print(f"current total {t}: ", total_time)
@@ -668,7 +713,31 @@ Examples:
         default=None,
         help='Maximum memory for indexes (MB). Overrides config. Default: from exp.conf'
     )
-    
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable debug logging (useful when running in debugger)'
+    )
+    parser.add_argument(
+        '--log-level',
+        type=str,
+        default=None,
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        help='Set logging level (overrides -v if provided)'
+    )
+    parser.add_argument(
+        '--no-cluster-filter',
+        action='store_true',
+        default=False,
+        help='Disable cluster-based arm filtering in oracle (allows all covering indexes to compete)'
+    )
+    parser.add_argument(
+        '--no-query-overlap-filter',
+        action='store_true',
+        default=False,
+        help='Disable query_id overlap filtering in oracle (allows redundant partial indexes)'
+    )
+
     return parser.parse_args()
 
 
@@ -723,6 +792,20 @@ if __name__ == "__main__":
     if args.max_memory is not None:
         configs.max_memory = args.max_memory
         print(f"Using max_memory from CLI: {args.max_memory}")
+    
+    # Apply --no-cluster-filter flag
+    if args.no_cluster_filter:
+        configs.enable_cluster_filter = False
+        print("Cluster-based arm filtering disabled")
+    else:
+        print(f"Cluster-based arm filtering enabled (default)")
+    
+    # Apply --no-query-overlap-filter flag
+    if args.no_query_overlap_filter:
+        configs.enable_query_overlap_filter = False
+        print("Query overlap filtering disabled")
+    else:
+        print(f"Query overlap filtering enabled (default)")
     
     # Create database adapter with command line overrides
     if use_postgres:
@@ -823,12 +906,28 @@ if __name__ == "__main__":
     run_folder = helper.get_experiment_folder_path(config_folder_name, run_timestamp)
     print(f"Run folder: {run_folder}")
     
-    # Update logging to use new path
-    logging.getLogger().handlers = []
-    logging.basicConfig(
-        filename=run_folder + configs.experiment_id + '.log',
-        filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
-    logging.getLogger().setLevel(logging.INFO)
+    # Update logging to use new path (both file and console output)
+    root = logging.getLogger()
+    root.handlers = []
+
+    # File handler
+    fh = logging.FileHandler(run_folder + configs.experiment_id + '.log', mode='w')
+    fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    root.addHandler(fh)
+
+    # Console handler
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    root.addHandler(sh)
+
+    # Determine log level: --log-level > -v > auto-detect > default (INFO)
+    if args.log_level:
+        log_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    elif args.verbose or _is_debugging():
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    logging.getLogger().setLevel(log_level)
     logging.info(f"Experiment config: {config_folder_name}")
     logging.info(f"CLI args: {vars(args)}")
     

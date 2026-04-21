@@ -15,11 +15,36 @@ class BanditArm:
         self.table_row_count = table_row_count
         self.name_encoded_context = []
         self.index_usage_last_batch = 0
+
+        # cluster: str or None
+        # Group identifier for full-coverage indexes (covers all query predicates).
+        # Set when len(col_permutation) == len(table_predicates), e.g., "customer_5_all".
+        # Used to mark arms as mutually exclusive - picking one removes others in same cluster.
         self.cluster = None
+
+        # query_id: int or None (legacy - use query_ids instead)
+        # The primary query ID associated with this arm (older pattern).
         self.query_id = None
+
+        # query_ids: Set[int]
+        # Set of query IDs that this index arm can benefit.
+        # An index on (a,b) benefits queries that use a or b in their predicates.
         self.query_ids = set()
+
+        # query_ids_backup: Set[int]
+        # Backup of query_ids for restoration or rollback purposes.
         self.query_ids_backup = set()
+
+        # is_include: 0 or 1
+        # Whether this is a "pure" covering index (full key coverage, no INCLUDE columns).
+        # 1 = full key coverage AND no INCLUDE columns (pure covering index).
+        # 0 = partial coverage OR has INCLUDE columns.
+        # Used in oracle to decide when to remove redundant partial indexes.
         self.is_include = 0
+        # arm_value: Dict[query_id, float]
+        # Estimated reward/benefit of this index arm per query.
+        # Calculated during arm generation as: (1 - selectivity) * coverage_ratio * table_row_count
+        # Higher value = more valuable index for that query.
         self.arm_value = {}
         self.clustered_index_time = 0
 

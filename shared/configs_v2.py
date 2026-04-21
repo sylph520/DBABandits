@@ -36,3 +36,10 @@ max_memory = int(exp_config[experiment_id]['max_memory'])
 # hyper parameters
 input_alpha = float(exp_config[experiment_id]['input_alpha'])
 input_lambda = float(exp_config[experiment_id]['input_lambda'])
+
+# cluster-based arm filtering (default: enabled for backward compatibility)
+enable_cluster_filter = exp_config[experiment_id].get('enable_cluster_filter', 'true').lower() == 'true'
+
+# query_id overlap filtering (default: enabled)
+# When enabled, removes partial indexes when their covering index is selected
+enable_query_overlap_filter = exp_config[experiment_id].get('enable_query_overlap_filter', 'true').lower() == 'true'
