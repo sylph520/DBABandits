@@ -737,6 +737,25 @@ Examples:
         default=False,
         help='Disable query_id overlap filtering in oracle (allows redundant partial indexes)'
     )
+    parser.add_argument(
+        '--hyp-cost-mode',
+        type=str,
+        default='none',
+        choices=['none', 'size', 'fixed'],
+        help='Creation cost mode for hypothetical indexes: none (0.00), size-based, or fixed'
+    )
+    parser.add_argument(
+        '--hyp-cost-fixed',
+        type=float,
+        default=0.01,
+        help='Fixed creation cost (seconds per MB) when --hyp-cost-mode=fixed'
+    )
+    parser.add_argument(
+        '--hyp-cost-size-multiplier',
+        type=float,
+        default=0.001,
+        help='Size multiplier (seconds per MB) when --hyp-cost-mode=size'
+    )
 
     return parser.parse_args()
 
@@ -807,6 +826,20 @@ if __name__ == "__main__":
     else:
         print(f"Query overlap filtering enabled (default)")
     
+    # Apply --hyp-cost-mode flag
+    if args.hyp_cost_mode:
+        configs.hyp_cost_mode = args.hyp_cost_mode
+        print(f"Hypo index creation cost mode: {configs.hyp_cost_mode}")
+        if args.hyp_cost_mode != 'none':
+            if args.hyp_cost_mode == 'fixed':
+                configs.hyp_cost_fixed = args.hyp_cost_fixed
+                print(f"  Fixed cost: {configs.hyp_cost_fixed} s/MB")
+            elif args.hyp_cost_mode == 'size':
+                configs.hyp_cost_size_multiplier = args.hyp_cost_size_multiplier
+                print(f"  Size multiplier: {configs.hyp_cost_size_multiplier} s/MB")
+    else:
+        print(f"Hypo index creation cost mode: none (default)")
+    
     # Create database adapter with command line overrides
     if use_postgres:
         import configparser
@@ -831,6 +864,9 @@ if __name__ == "__main__":
             'schema': args.db_schema or db_config.get('POSTGRESQL', 'schema', fallback='public'),
             'port': args.db_port or db_config.getint('POSTGRESQL', 'port', fallback=51204),
             'use_real_indexes_in_rounds': configs.use_real_indexes_in_rounds,
+            'hyp_cost_mode': configs.hyp_cost_mode,
+            'hyp_cost_fixed': configs.hyp_cost_fixed,
+            'hyp_cost_size_multiplier': configs.hyp_cost_size_multiplier,
         }
         
         # Always use create_db_adapter_with_params when use_postgres is True

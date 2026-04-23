@@ -53,6 +53,11 @@ class PostgreSQLAdapter(DatabaseInterface):
         self._pk_columns_cache: Dict[str, List[str]] = {}
         self.use_real_indexes_in_rounds = connection_params.get('use_real_indexes_in_rounds', False)
         
+        # HypoPG cost estimation parameters
+        self._hypopg_cost_mode = connection_params.get('hyp_cost_mode', 'none')
+        self._hypopg_fixed_cost = connection_params.get('hyp_cost_fixed', 0.01)
+        self._hypopg_size_multiplier = connection_params.get('hyp_cost_size_multiplier', 0.001)
+        
     def connect(self) -> Any:
         """Establish connection to PostgreSQL."""
         conn_params = {
@@ -82,14 +87,15 @@ class PostgreSQLAdapter(DatabaseInterface):
         """
         Create an index and return creation time.
         
-        NOTE: PostgreSQL doesn't have INCLUDE clause like MSSQL.
-        For covering indexes, add columns to the index itself.
+        When using hypothetical indexes (HypoPG):
+        - If hyp_cost_mode='none': returns 0.0 (no actual creation)
+        - If hyp_cost_mode='size': estimates based on size * multiplier
+        - If hyp_cost_mode='fixed': estimates as fixed value per MB
         
-        NOTE: Column names are normalized to lowercase for PostgreSQL compatibility.
+        When using real indexes: returns actual creation time.
         """
         import time
-        
-        start_time = time.time()
+        import constants
         
         cursor = self._connection.cursor()
         
@@ -113,10 +119,42 @@ class PostgreSQLAdapter(DatabaseInterface):
                 sql.SQL(', ').join(map(sql.Identifier, column_names_lower))
             )
         
-        cursor.execute(query)
-        
-        end_time = time.time()
-        creation_cost = end_time - start_time
+        # Handle different index creation modes
+        if self.use_real_indexes_in_rounds:
+            # Real indexes - measure actual creation time
+            start_time = time.time()
+            cursor.execute(query)
+            end_time = time.time()
+            creation_cost = end_time - start_time
+        else:
+            # Hypothetical indexes - use HypoPG
+            cursor.execute(query)
+            
+            # Get the HypoPG index OID for size calculation
+            cursor.execute(
+                "SELECT indexrelid FROM hypopg_list_indexes() WHERE indexname = %s",
+                (index_name,)
+            )
+            result = cursor.fetchone()
+            
+            if result and hasattr(self, '_hypopg_cost_mode'):
+                # Calculate estimated cost based on mode
+                if self._hypopg_cost_mode == 'none':
+                    creation_cost = 0.0
+                elif self._hypopg_cost_mode == 'size':
+                    # Get size from HypoPG and apply multiplier
+                    size_bytes = self.hypopg_relation_size(result[0])
+                    size_mb = size_bytes / (1024.0 * 1024.0)
+                    creation_cost = size_mb * self._hypopg_size_multiplier
+                elif self._hypopg_cost_mode == 'fixed':
+                    # Get size and apply fixed rate
+                    size_bytes = self.hypopg_relation_size(result[0])
+                    size_mb = size_bytes / (1024.0 * 1024.0)
+                    creation_cost = size_mb * self._hypopg_fixed_cost
+                else:
+                    creation_cost = 0.0
+            else:
+                creation_cost = 0.0
         
         logging.info(f"Added: {index_name}")
         
@@ -507,6 +545,20 @@ class PostgreSQLAdapter(DatabaseInterface):
         result = cursor.fetchone()
         
         return result[0] if result else 0.0
+    
+    def hypopg_relation_size(self, index_oid: int) -> int:
+        """Get the estimated size of a hypothetical index using HypoPG.
+        
+        Args:
+            index_oid: The OID of the hypothetical index
+            
+        Returns:
+            Estimated size in bytes
+        """
+        cursor = self._connection.cursor()
+        cursor.execute("SELECT hypopg_relation_size(%s)", (index_oid,))
+        result = cursor.fetchone()
+        return result[0] if result and result[0] else 0
     
     def get_selectivity(self, query: str, predicates: Dict[str, List[str]]) -> Dict[str, float]:
         """
