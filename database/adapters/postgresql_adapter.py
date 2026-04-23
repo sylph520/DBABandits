@@ -51,6 +51,7 @@ class PostgreSQLAdapter(DatabaseInterface):
         self.port = connection_params.get('port', 51204)
         self._tables_global: Dict[str, TableInfo] = None
         self._pk_columns_cache: Dict[str, List[str]] = {}
+        self.use_real_indexes_in_rounds = connection_params.get('use_real_indexes_in_rounds', False)
         
     def connect(self) -> Any:
         """Establish connection to PostgreSQL."""
@@ -472,21 +473,30 @@ class PostgreSQLAdapter(DatabaseInterface):
             return 8  # Default
     
     def get_current_pds_size(self) -> float:
-        """Get current size of all indexes in MB."""
-        # Query to get size of all indexes in the schema
-        # pg_relation_size returns bytes, convert to MB
-        query = """
-            SELECT 
-                COALESCE(SUM(pg_relation_size(indexrelid)), 0) / (1024.0 * 1024.0) as total_size_mb
-            FROM pg_stat_user_indexes
-            WHERE schemaname = %s;
+        """Get current size of all indexes in MB.
+        
+        When using hypothetical indexes (use_real_indexes_in_rounds=False),
+        uses hypopg_relation_size() to get estimated sizes.
+        When using real indexes, uses pg_relation_size().
         """
-        
         cursor = self._connection.cursor()
-        cursor.execute(query, (self.schema_name,))
-        result = cursor.fetchone()
         
-        return float(result[0]) if result and result[0] else 0.0
+        if not self.use_real_indexes_in_rounds:
+            # Using hypothetical indexes - use HypoPG's size estimation
+            cursor.execute("SELECT hypopg_relation_size(indexrelid) FROM hypopg_list_indexes()")
+            total = sum(row[0] for row in cursor.fetchall() if row[0])
+            return total / (1024.0 * 1024.0)
+        else:
+            # Using real indexes - use actual PostgreSQL sizes
+            query = """
+                SELECT 
+                    COALESCE(SUM(pg_relation_size(indexrelid)), 0) / (1024.0 * 1024.0) as total_size_mb
+                FROM pg_stat_user_indexes
+                WHERE schemaname = %s;
+            """
+            cursor.execute(query, (self.schema_name,))
+            result = cursor.fetchone()
+            return float(result[0]) if result and result[0] else 0.0
     
     def get_database_size(self) -> float:
         """Get total database size in MB."""

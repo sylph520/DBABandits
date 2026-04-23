@@ -830,6 +830,7 @@ if __name__ == "__main__":
             'password': args.db_password if args.db_password is not None else db_config.get('POSTGRESQL', 'password', fallback=''),
             'schema': args.db_schema or db_config.get('POSTGRESQL', 'schema', fallback='public'),
             'port': args.db_port or db_config.getint('POSTGRESQL', 'port', fallback=51204),
+            'use_real_indexes_in_rounds': configs.use_real_indexes_in_rounds,
         }
         
         # Always use create_db_adapter_with_params when use_postgres is True
