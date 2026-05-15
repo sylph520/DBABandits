@@ -10,6 +10,7 @@ from bandits.bandit_arm import BanditArm
 bandit_arm_store = {}
 
 
+# opencode
 def _get_tables_from_connection(connection):
     """Get tables from adapter or sql_helper."""
     if hasattr(connection, 'get_tables') and callable(getattr(connection, 'get_tables')):
@@ -215,6 +216,7 @@ def gen_arms_from_predicates_single(connection, query_obj):
 # ========================== Context Vectors ==========================
 
 
+# opencode
 def get_predicate_position(arm, predicate, table_name):
     """
     Returns float between 0 and 1  if a arm includes a predicate for the the correct table
@@ -224,13 +226,14 @@ def get_predicate_position(arm, predicate, table_name):
     :param table_name: table name
     :return: float [0, 1]
     """
-    predicate_lower = predicate.lower()
+    predicate_lower = predicate.lower()  # opencode: case-insensitive comparison
     for i in range(len(arm.index_cols)):
         if table_name == arm.table_name and predicate_lower == arm.index_cols[i].lower():
             return i
     return -1
 
 
+# opencode
 def get_context_vector_v2(bandit_arm: BanditArm, all_columns, context_size, uniqueness=0, includes=False):
     """
     Return the context vector for a given arm, and set of predicates. Size of the context vector will depend on
@@ -261,7 +264,7 @@ def get_context_vector_v2(bandit_arm: BanditArm, all_columns, context_size, uniq
                         context_vectors[column_position_in_arm][i] = 1
                     else:
                         left_over_context[i] = 1 / (10 ** column_position_in_arm)
-                elif all_columns[table_name][k].lower() in [c.lower() for c in bandit_arm.include_cols]:
+                elif all_columns[table_name][k].lower() in [c.lower() for c in bandit_arm.include_cols]:  # opencode: case-insensitive
                     include_context[i] = 1
                 i += 1
 
@@ -276,6 +279,7 @@ def get_context_vector_v2(bandit_arm: BanditArm, all_columns, context_size, uniq
     return context_vector
 
 
+# opencode
 def get_name_encode_context_vectors_v2(bandit_arm_dict, all_columns, context_size, uniqueness=0, includes=False):
     """
     Return the context vectors for a given arms, and set of predicates.
@@ -295,6 +299,7 @@ def get_name_encode_context_vectors_v2(bandit_arm_dict, all_columns, context_siz
     return context_vectors
 
 
+# opencode
 def get_derived_value_context_vectors_v3(connection, bandit_arm_dict, query_obj_list, chosen_arms_last_round,
                                          with_includes):
     """
@@ -331,6 +336,7 @@ def get_derived_value_context_vectors_v3(connection, bandit_arm_dict, query_obj_
     return context_vectors
 
 
+# opencode
 def get_query_context_v1(query_object, all_columns, context_size):
     """
     Return the context vectors for a given query.

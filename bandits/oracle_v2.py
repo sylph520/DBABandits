@@ -63,7 +63,7 @@ class BaseOracle:
         return reduced_arm_ucb_dict
 
     @staticmethod
-    def removed_covered_clusters(arm_ucb_dict, chosen_id, bandit_arms, enable_cluster_filter=True):
+    def removed_covered_clusters(arm_ucb_dict, chosen_id, bandit_arms, enable_cluster_filter=True):  # opencode
         """
         Remove arms that are in the same cluster as the chosen arm.
         When enable_cluster_filter is False, skip this filtering (allow all covering indexes).
@@ -86,6 +86,7 @@ class BaseOracle:
                 reduced_arm_ucb_dict[arm_id] = arm_ucb_dict[arm_id]
         return reduced_arm_ucb_dict
 
+    # opencode
     @staticmethod
     def removed_covered_queries_v2(arm_ucb_dict, chosen_id, bandit_arms, enable_query_overlap_filter=True):
         """

@@ -104,6 +104,7 @@ class C3UCB(C3UCBBaseBandit):
         """
         self.arms = bandit_arms
 
+    # opencode
     def set_enable_cluster_filter(self, enable: bool):
         """
         Enable or disable cluster-based arm filtering in oracle.
@@ -112,6 +113,7 @@ class C3UCB(C3UCBBaseBandit):
         """
         self.enable_cluster_filter = enable
 
+    # opencode
     def set_enable_query_overlap_filter(self, enable: bool):
         """
         Enable or disable query_id overlap filtering in oracle.
