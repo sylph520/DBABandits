@@ -1,3 +1,4 @@
+# opencode: NEW FILE - Database module exports
 """
 Database module for DBA Bandits.
 

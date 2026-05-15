@@ -1,3 +1,4 @@
+# opencode: NEW FILE - Database adapters package
 """
 Database adapters package.
 """

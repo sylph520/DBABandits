@@ -1,3 +1,4 @@
+# opencode: NEW FILE - Database adapter factory
 """
 Database adapter factory for creating appropriate database connections.
 """
@@ -45,6 +46,7 @@ elif PostgreSQLAdapter:
     ADAPTER_REGISTRY['postgres'] = PostgreSQLAdapter
 
 
+# opencode: NEW FUNCTION - Create database adapter by type
 def create_db_adapter(db_type: str, connection_params: Dict[str, Any]) -> DatabaseInterface:
     """
     Factory function to create a database adapter.
@@ -70,6 +72,7 @@ def create_db_adapter(db_type: str, connection_params: Dict[str, Any]) -> Databa
     return adapter_class(connection_params)
 
 
+# opencode: NEW FUNCTION - Create adapter from config file
 def create_db_adapter_from_config(config_path: str = None) -> DatabaseInterface:
     """
     Create database adapter from configuration file.

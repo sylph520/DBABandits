@@ -2,6 +2,7 @@
 Microsoft SQL Server adapter implementing DatabaseInterface.
 """
 
+# opencode
 import logging
 from typing import Dict, List, Tuple, Any
 import pyodbc
@@ -16,6 +17,7 @@ from database.column import Column
 import constants
 
 
+# opencode
 class MSSQLAdapter(DatabaseInterface):
     """
     Microsoft SQL Server adapter for DBA Bandits.

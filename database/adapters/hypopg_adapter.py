@@ -36,12 +36,15 @@ Usage:
     db.drop_hypothetical_index(index_id)
 """
 
+# opencode
 import logging
 from typing import Dict, List, Tuple, Any, Optional
 
 from database.adapters.postgresql_adapter import PostgreSQLAdapter
+from database.base import QueryPlanInfo
 
 
+# opencode
 class HypoPGAdapter(PostgreSQLAdapter):
     """
     PostgreSQL adapter with HypoPG extension for hypothetical indexes.
@@ -114,6 +117,7 @@ class HypoPGAdapter(PostgreSQLAdapter):
             column_names_lower = tuple(col.lower() for col in column_names)
             include_columns_lower = tuple(col.lower() for col in include_columns) if include_columns else ()
             
+            # opencode: HypoPG does not support user-assigned index names, uses auto-generated <oid>btree_... format
             if include_columns_lower:
                 all_columns = column_names_lower + include_columns_lower
                 index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)}) INCLUDE ({', '.join(include_columns_lower)})"
@@ -127,11 +131,45 @@ class HypoPGAdapter(PostgreSQLAdapter):
             self.hypothetical_indexes[index_name] = index_id
             logging.debug(f"Created hypothetical index {index_name} (ID: {index_id})")
             
-            return 0.0
+            # opencode: Optionally include estimated creation cost for hyp indexes
+            if getattr(self, '_include_hyp_cost', False) and self._hypopg_cost_mode != 'none':
+                cursor.execute("SELECT hypopg_relation_size(%s)", (index_id,))
+                size_result = cursor.fetchone()
+                size_bytes = size_result[0] if size_result and size_result[0] else 0
+                size_mb = size_bytes / (1024.0 * 1024.0)
+                if self._hypopg_cost_mode == 'size':
+                    creation_cost = size_mb * self._hypopg_size_multiplier
+                elif self._hypopg_cost_mode == 'fixed':
+                    creation_cost = size_mb * self._hypopg_fixed_cost
+                else:
+                    creation_cost = 0.0
+            else:
+                creation_cost = 0.0
+            return creation_cost
             
         except Exception as e:
             logging.error(f"Failed to create hypothetical index: {e}")
             raise
+    
+    # opencode: Override get_query_plan to translate HypoPG-generated index names back to arm names.
+    # HypoPG auto-generates names in <oid>btree_<tablename>_<col1>_<col2>... format (ignoring user-provided names).
+    # This mapping uses hypopg_list_indexes() + self.hypothetical_indexes (arm_name -> oid) to translate.
+    def get_query_plan(self, query: str, use_analyze: bool = True) -> QueryPlanInfo:
+        plan_info = super().get_query_plan(query, use_analyze)
+        if not self.hypothetical_indexes:
+            return plan_info
+        cursor = self._connection.cursor()
+        cursor.execute("SELECT indexrelid, indexname FROM hypopg_list_indexes()")
+        oid_to_hyp_name = {r[0]: r[1] for r in cursor.fetchall()}
+        oid_to_arm = {v: k for k, v in self.hypothetical_indexes.items()}
+        hyp_to_arm = {}
+        for oid, hyp_name in oid_to_hyp_name.items():
+            arm_name = oid_to_arm.get(oid)
+            if arm_name:
+                hyp_to_arm[hyp_name] = arm_name
+        translated = [(hyp_to_arm.get(name, name), table, cost) for name, table, cost in plan_info.non_clustered_index_usage]
+        plan_info.non_clustered_index_usage = translated
+        return plan_info
     
     def drop_index(self, table_name: str, index_name: str) -> None:
         """
