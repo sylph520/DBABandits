@@ -49,6 +49,7 @@ def plot_histogram_v2(statistics_dict, window_size,  title, experiment_id, times
     plt.show()
 
 
+# opencode
 def get_config_folder_path(config_name):
     """
     Get the folder location for a specific experiment config (without timestamp).
@@ -83,6 +84,7 @@ def get_experiment_folder_path(experiment_id, timestamp=None):
     return experiment_folder_path
 
 
+# opencode
 def get_experiment_run_path(config_folder_name, timestamp=None):
     """
     Get the folder location for an experiment run using the config folder name.
@@ -208,6 +210,7 @@ def update_dict_list(current, new):
     return current
 
 
+# opencode
 def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False, timestamp=None, config_folder_name=None):
     """
     Creates a plot for several experiment reports
@@ -241,6 +244,7 @@ def plot_exp_report(exp_id, exp_report_list, measurement_names, log_y=False, tim
             sns_plot.savefig(get_experiment_folder_path(exp_id, timestamp) + plot_title + '.png')
 
 
+# opencode
 def create_comparison_tables(exp_id, exp_report_list, timestamp=None, config_folder_name=None):
     """
     Create a CSV with numbers that are important for the comparison

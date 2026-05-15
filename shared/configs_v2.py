@@ -37,13 +37,16 @@ max_memory = int(exp_config[experiment_id]['max_memory'])
 input_alpha = float(exp_config[experiment_id]['input_alpha'])
 input_lambda = float(exp_config[experiment_id]['input_lambda'])
 
+# opencode
 # cluster-based arm filtering (default: enabled for backward compatibility)
 enable_cluster_filter = exp_config[experiment_id].get('enable_cluster_filter', 'true').lower() == 'true'
 
+# opencode
 # query_id overlap filtering (default: enabled)
 # When enabled, removes partial indexes when their covering index is selected
 enable_query_overlap_filter = exp_config[experiment_id].get('enable_query_overlap_filter', 'true').lower() == 'true'
 
+# opencode
 # Hypothetical index creation cost estimation mode
 # Options: 'none' (0.00s), 'size' (based on size * multiplier), 'fixed' (fixed value per MB)
 hyp_cost_mode = exp_config[experiment_id].get('hyp_cost_mode', 'none')

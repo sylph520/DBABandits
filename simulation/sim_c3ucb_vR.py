@@ -1,14 +1,6 @@
 import sys
 import os
 
-# Force unbuffered output
-sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 1)
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-print("DEBUG: Script starting...", flush=True)
-
 import datetime
 import logging
 import operator
@@ -30,9 +22,17 @@ import shared.helper as helper
 from bandits.experiment_report import ExpReport
 from bandits.oracle_v2 import OracleV7 as Oracle
 from bandits.query_v5 import Query
-from database import create_db_adapter_from_config, DatabaseInterface
+from database import DatabaseInterface
 
+# Force unbuffered output
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 1)
 
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+print("DEBUG: Script starting...", flush=True)
+
+# opencode: NEW FUNCTION - Auto-detect debugger
 def _is_debugging():
     """Auto-detect if running in debugger (VSCode, PyCharm, etc.)"""
     import sys
@@ -54,17 +54,22 @@ def _is_debugging():
 
     return False
 
+# opencode: Helper function for dictionary key normalization
+def normalize_dict_keys(d):
+    """Normalize dictionary keys to lowercase for PostgreSQL compatibility."""
+    return {k.lower(): v for k, v in d.items()}
 
 # Simulation built on vQ to collect the super arm performance
 # Now supports both MSSQL and PostgreSQL via database abstraction layer
 
-
+# opencode: NEW CLASS - Base simulator with database adapter support
 class BaseSimulator:
+    # opencode: NEW METHOD - Initialize simulator with adapter support
     def __init__(self, db_adapter: Optional[DatabaseInterface] = None, hypopg_available: bool = False, use_optimizer_costs: bool = True):
         """
         setup queries (self.queries), db connection (self.connection),
         and an empty query_object_store
-        
+
         Args:
             db_adapter: Optional pre-configured database adapter. If not provided,
                        will create one from config (supports MSSQL and PostgreSQL)
@@ -72,30 +77,31 @@ class BaseSimulator:
             use_optimizer_costs: If True, use EXPLAIN optimizer cost estimates instead of 
                                 actual query execution (faster for testing)
         """
+        # opencode: NEW ATTRIBUTE - HypoPG availability flag
         self.hypopg_available = hypopg_available
+        # opencode: NEW ATTRIBUTE - Use optimizer costs mode
         self.use_optimizer_costs = use_optimizer_costs
 
         # Get the query List
         self.queries = helper.get_queries_v2()
-        
-        # Support both old-style connection and new abstraction layer
+
+        # opencode: MODIFIED - Support both adapter and legacy connection
         if db_adapter is not None:
             self.db = db_adapter
             self.uses_adapter = True
             if not self.db._connection:
                 self.db.connect()
-            # For Query class compatibility, use db as connection
             self.connection = self.db
         else:
             # Legacy MSSQL mode
             self.connection = sql_connection.get_sql_connection()
             self.db = None
             self.uses_adapter = False
-            
+
         self.query_obj_store: Dict[int, Query] = {}
         reload(bandit_helper)
 
-
+# opencode: NEW CLASS - Simulator with class methods for refactoring
 class Simulator(BaseSimulator):
     # Simulator inherit from BaseSimulator (init queries and db connections)
     def run(self):
@@ -111,158 +117,6 @@ class Simulator(BaseSimulator):
 
         results = []
 
-        # Helper methods for database operations (adapter or legacy)
-        def _get_db_connection():
-            """Get database connection - adapter or legacy."""
-            if self.uses_adapter:
-                return self.db
-            return self.connection
-
-        def _get_all_columns():
-            """Get all columns - adapter or legacy."""
-            if self.uses_adapter:
-                return self.db.get_all_columns()
-            return sql_helper.get_all_columns(self.connection)
-
-        def _get_current_pds_size():
-            """Get current PDS size - adapter or legacy."""
-            if self.uses_adapter:
-                return self.db.get_current_pds_size()
-            return sql_helper.get_current_pds_size(self.connection)
-
-        def _create_query_drop(chosen_arms, added_arms, deleted_arms, queries, t):
-            """Create indexes, execute queries, drop indexes - adapter or legacy."""
-            if self.uses_adapter:
-                # Set hypopg_enabled based on current round and use_real_indexes_in_rounds flag
-                # - In hyp_rounds phase: always use hypothetical (True)
-                # - In rounds phase: use hypothetical if use_real_indexes_in_rounds is False
-                if hasattr(self.db, 'hypopg_enabled'):
-                    if t < configs.hyp_rounds:
-                        self.db.hypopg_enabled = True
-                    else:
-                        self.db.hypopg_enabled = not configs.use_real_indexes_in_rounds
-                
-                for index_name, bandit_arm in deleted_arms.items():
-                    self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)
-                
-                creation_cost = {}
-                for index_name, bandit_arm in added_arms.items():
-                    cost = self.db.create_index(
-                        bandit_arm.table_name,
-                        bandit_arm.index_cols,
-                        bandit_arm.index_name,
-                        bandit_arm.include_cols
-                    )
-                    creation_cost[index_name] = cost
-                
-                # Execute queries and calculate rewards
-                execute_cost = 0
-                arm_rewards = {}
-                
-                if self.use_optimizer_costs:
-                    # Use EXPLAIN optimizer costs instead of actual execution
-                    # This is much faster for testing
-                    for query in queries:
-                        # Get query plan with estimated costs
-                        plan_info = self.db.get_query_plan(query.query_string)
-                        # PostgreSQL costs are in arbitrary units, use total_cost
-                        time_taken = plan_info.est_statement_sub_tree_cost
-                        execute_cost += time_taken
-                        
-                        # For optimizer-only mode, assume all chosen indexes are used
-                        # This is a simplification - in real execution we'd check nc_usage
-                        for idx_name in chosen_arms.keys():
-                            if idx_name not in arm_rewards:
-                                arm_rewards[idx_name] = [0, 0]
-                            arm_rewards[idx_name][0] += time_taken / len(chosen_arms)
-                else:
-                    # Actual query execution (slower but real metrics)
-                    for query in queries:
-                        time_taken, nc_usage, c_usage = self.db.execute_query(query.query_string, clear_cache=False)
-                        execute_cost += time_taken
-                        # Simplified reward calculation for adapter
-                        for idx_use in nc_usage:
-                            if idx_use.index_name in chosen_arms:
-                                if idx_use.index_name not in arm_rewards:
-                                    arm_rewards[idx_use.index_name] = [0, 0]
-                                arm_rewards[idx_use.index_name][0] += time_taken  # Simplified
-                
-                # Add creation costs
-                for key, cost in creation_cost.items():
-                    if key in arm_rewards:
-                        arm_rewards[key][1] += -1 * cost
-                    else:
-                        arm_rewards[key] = [0, -1 * cost]
-                
-                return execute_cost, creation_cost, arm_rewards
-            else:
-                # Legacy MSSQL mode
-                if t < configs.hyp_rounds:
-                    return sql_helper.hyp_create_query_drop_v2(
-                        self.connection, constants.SCHEMA_NAME,
-                        chosen_arms, added_arms, deleted_arms, queries
-                    )
-                else:
-                    return sql_helper.create_query_drop_v3(
-                        self.connection, constants.SCHEMA_NAME,
-                        chosen_arms, added_arms, deleted_arms, queries
-                    )
-
-        def _bulk_drop_index(bandit_arms):
-            """Drop multiple indexes - adapter or legacy."""
-            if self.uses_adapter:
-                for index_name, bandit_arm in bandit_arms.items():
-                    self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)
-            else:
-                sql_helper.bulk_drop_index(self.connection, constants.SCHEMA_NAME, bandit_arms)
-
-        def _restart_server():
-            """Restart server - adapter or legacy."""
-            if self.uses_adapter and hasattr(self, 'use_optimizer_costs') and not self.use_optimizer_costs:
-                # Only restart if actually executing queries (not using optimizer costs only)
-                self.db.restart_server()
-            elif self.uses_adapter:
-                logging.info("Skipping server restart (optimizer cost mode - no state to clear)")
-            else:
-                sql_helper.restart_sql_server()
-
-        def _create_query_postgres(query_id, query_string, predicates, payloads, time_stamp):
-            """Create a Query object for PostgreSQL using the adapter."""
-            print(f"DEBUG: Inside _create_query_postgres for query_id={query_id}", flush=True)
-            
-            # Normalize table names to lowercase for PostgreSQL compatibility
-            def normalize_dict_keys(d):
-                return {k.lower(): v for k, v in d.items()}
-            
-            predicates_normalized = normalize_dict_keys(predicates)
-            payloads_normalized = normalize_dict_keys(payloads)
-            
-            # Create a minimal Query-like object manually
-            query = Query.__new__(Query)
-            query.id = query_id
-            query.predicates = predicates_normalized
-            query.payload = payloads_normalized
-            query.group_by = {}
-            query.order_by = {}
-            
-            # Use adapter to get selectivity (with normalized keys)
-            query.selectivity = self.db.get_selectivity(query_string, predicates_normalized)
-            
-            query.query_string = query_string
-            query.frequency = 1
-            query.last_seen_round = time_stamp
-            query.first_seen_round = time_stamp
-            
-            # Initialize scan time structures
-            tables = self.db.get_tables()
-            query.table_scan_times = {t: [] for t in tables.keys()}
-            query.index_scan_times = {t: [] for t in tables.keys()}
-            query.table_scan_times_hyp = {t: [] for t in tables.keys()}
-            query.index_scan_times_hyp = {t: [] for t in tables.keys()}
-            query.context = None
-            
-            return query
-
         super_arm_scores = {}
         super_arm_counts = {}
         best_super_arm = set()
@@ -274,12 +128,12 @@ class Simulator(BaseSimulator):
         logging.info("Starting MAB...\n")
 
         # Get all the columns from the database
-        all_columns, number_of_columns = _get_all_columns()
+        all_columns, number_of_columns = self.get_all_columns()
         context_size = number_of_columns * (
                     1 + constants.CONTEXT_UNIQUENESS + constants.CONTEXT_INCLUDES) + constants.STATIC_CONTEXT_SIZE
 
         # Create oracle and the bandit
-        configs.max_memory -= int(_get_current_pds_size())
+        configs.max_memory -= int(self.get_current_pds_size())
         oracle = Oracle(configs.max_memory)
         c3ucb_bandit = bandits.C3UCB(context_size, configs.input_alpha, configs.input_lambda, oracle)
         c3ucb_bandit.set_enable_cluster_filter(configs.enable_cluster_filter)
@@ -333,8 +187,8 @@ class Simulator(BaseSimulator):
                 else:
                     if self.uses_adapter:
                         # For PostgreSQL: create Query manually and use adapter for selectivity
-                        print(f"DEBUG: About to call _create_query_postgres for query_id={query_id}", flush=True)
-                        query = _create_query_postgres(query_id, query['query_string'], 
+                        print(f"DEBUG: About to call create_query_postgres for query_id={query_id}", flush=True)
+                        query = self.create_query_postgres(query_id, query['query_string'], 
                                                        query['predicates'], query['payload'], t)
                     else:
                         # For MSSQL: use standard Query class
@@ -379,7 +233,7 @@ class Simulator(BaseSimulator):
                 # Get the predicates for queries and Generate index arms for each query
                 index_arms = {}
                 for i in range(len(query_obj_list_past)):  # for each previously seen query
-                    bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(_get_db_connection(), query_obj_list_past[i])
+                    bandit_arms_tmp = bandit_helper.gen_arms_from_predicates_v2(self.get_db_connection(), query_obj_list_past[i])
                     for key, index_arm in bandit_arms_tmp.items():
                         if key not in index_arms:
                             index_arm.query_ids = set()
@@ -396,7 +250,8 @@ class Simulator(BaseSimulator):
                 if t == configs.hyp_rounds and configs.hyp_rounds != 0:
                     index_arms = {}
                 index_arm_list = list(index_arms.values())
-                logging.info(f"Generated {len(index_arm_list)} arms: {[a.index_name for a in index_arm_list]}")
+                logging.info(f"Generated {len(index_arm_list)} arms")
+                # logging.info(f": {[a.index_name for a in index_arm_list]}")
                 c3ucb_bandit.set_arms(index_arm_list)
 
                 # creating the context, here we pass all the columns in the database
@@ -404,7 +259,7 @@ class Simulator(BaseSimulator):
                                                                               number_of_columns,
                                                                               constants.CONTEXT_UNIQUENESS,
                                                                               constants.CONTEXT_INCLUDES)
-                context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(_get_db_connection(), index_arms, query_obj_list_past,
+                context_vectors_v2 = bandit_helper.get_derived_value_context_vectors_v3(self.get_db_connection(), index_arms, query_obj_list_past,
                                                                               chosen_arms_last_round, not constants.CONTEXT_INCLUDES)
                 context_vectors = []
                 for i in range(len(context_vectors_v1)):
@@ -432,7 +287,7 @@ class Simulator(BaseSimulator):
 
                 # clean everything at start of actual rounds
                 if configs.hyp_rounds != 0 and t == configs.hyp_rounds:
-                    _bulk_drop_index(chosen_arms_last_round)
+                    self.bulk_drop_index(chosen_arms_last_round)
                     chosen_arms_last_round = {}
 
             # finding the difference between last round and this round
@@ -453,7 +308,7 @@ class Simulator(BaseSimulator):
                 deleted_arms[key] = chosen_arms_last_round[key]
 
             start_time_create_query = datetime.datetime.now()
-            time_taken, creation_cost_dict, arm_rewards = _create_query_drop(chosen_arms, added_arms, deleted_arms, query_obj_list_current, t)
+            time_taken, creation_cost_dict, arm_rewards = self.create_query_drop(chosen_arms, added_arms, deleted_arms, query_obj_list_current, t)
             end_time_create_query = datetime.datetime.now()
             creation_cost = sum(creation_cost_dict.values())
             index_config = {
@@ -489,10 +344,10 @@ class Simulator(BaseSimulator):
             chosen_arms_last_round = chosen_arms
 
             if t == (configs.rounds + configs.hyp_rounds - 1):
-                _bulk_drop_index(chosen_arms)
+                self.bulk_drop_index(chosen_arms)
 
             end_time_round = datetime.datetime.now()
-            current_config_size = float(_get_current_pds_size())
+            current_config_size = float(self.get_current_pds_size())
             logging.info("Size taken by the config: " + str(current_config_size) + "MB")
             # Adding information to the results array
             if t >= configs.hyp_rounds:
@@ -520,16 +375,298 @@ class Simulator(BaseSimulator):
         logging.info("Time taken by bandit for " + str(configs.rounds) + " rounds: " + str(total_time))
         logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
             sorted(arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
-        _restart_server()
+        self.restart_server()
         return results, total_time
 
+    # === Class methods for database operations (opencode: refactored from inner functions) ===
 
+    # opencode: NEW METHOD - Get database connection
+    def get_db_connection(self):
+        """Get database connection - adapter or legacy."""
+        if self.uses_adapter:
+            return self.db
+        return self.connection
+
+    # opencode: NEW METHOD - Get all columns
+    def get_all_columns(self):
+        """Get all columns - adapter or legacy."""
+        if self.uses_adapter:
+            return self.db.get_all_columns()
+        return sql_helper.get_all_columns(self.connection)
+
+    # opencode: NEW METHOD - Get current PDS size
+    def get_current_pds_size(self):
+        """Get current PDS size - adapter or legacy."""
+        if self.uses_adapter:
+            return self.db.get_current_pds_size()
+        return sql_helper.get_current_pds_size(self.connection)
+
+    # opencode: NEW METHOD - Create query and drop
+    def create_query_drop(self, chosen_arms, added_arms, deleted_arms, queries, t):
+        """Create indexes, execute queries, drop indexes - adapter or legacy."""
+        if self.uses_adapter:
+            # Set hypopg_enabled based on current round and use_real_indexes_in_rounds flag
+            # - In hyp_rounds phase: always use hypothetical (True)
+            # - In rounds phase: use hypothetical if use_real_indexes_in_rounds is False
+            if hasattr(self.db, 'hypopg_enabled'):
+                if t < configs.hyp_rounds:
+                    self.db.hypopg_enabled = True
+                else:
+                    self.db.hypopg_enabled = not configs.use_real_indexes_in_rounds
+
+            for index_name, bandit_arm in deleted_arms.items():
+                self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)
+
+            creation_cost = {}
+            for index_name, bandit_arm in added_arms.items():
+                cost = self.db.create_index(
+                    bandit_arm.table_name,
+                    bandit_arm.index_cols,
+                    bandit_arm.index_name,
+                    bandit_arm.include_cols
+                )
+                creation_cost[index_name] = cost
+
+            # opencode: Phase for reward calculation
+            # - Optimizer mode: always simple reward (hypothetical execution)
+            # - Actual mode: simple in hyp_rounds, complex in rounds
+            is_hyp_phase = t < configs.hyp_rounds
+            is_hyp_phase_for_reward = self.use_optimizer_costs or is_hyp_phase
+
+            # opencode: Baseline attribute based on use_optimizer_costs (aligned with master)
+            # - use_optimizer_costs=True: use table_scan_times_hyp (optimizer estimates)
+            # - use_optimizer_costs=False: use table_scan_times (actual execution)
+            baseline_attr = 'table_scan_times_hyp' if self.use_optimizer_costs else 'table_scan_times'
+
+            # opencode: Initialize accumulators
+            execute_cost = 0
+            arm_rewards = {}
+
+            for query in queries:
+                # opencode: Use ANALYZE only if NOT using optimizer costs
+                # use_optimizer_costs=True -> use EXPLAIN only (fast, estimates)
+                # use_optimizer_costs=False -> use EXPLAIN ANALYZE (actual execution)
+                use_analyze = not self.use_optimizer_costs
+
+                # Get index usage based on mode
+                if self.use_optimizer_costs:
+                    # Optimizer mode: use EXPLAIN (use_analyze=False by default)
+                    plan_info = self.db.get_query_plan(query.query_string, use_analyze=use_analyze)
+                    execute_cost += plan_info.est_statement_sub_tree_cost
+                    index_usage = plan_info.non_clustered_index_usage
+                    total_cost = plan_info.est_statement_sub_tree_cost
+                    # opencode: Extract clustered scan data for penalty in real phase
+                    clustered_scans = {}
+                    for c in plan_info.clustered_index_usage:
+                        clustered_scans[c.table_name] = c.elapsed_time
+                else:
+                    # Actual execution mode: execute queries and measure real time
+                    time_taken, nc_usage, c_usage = self.db.execute_query(query.query_string, clear_cache=False)
+                    execute_cost += time_taken
+                    index_usage = [(idx_use.index_name, idx_use.table_name, idx_use.elapsed_time) for idx_use in nc_usage]
+                    total_cost = time_taken
+                    # opencode: Extract clustered scan data for penalty
+                    clustered_scans = {}
+                    for c in c_usage:
+                        clustered_scans[c.table_name] = c.elapsed_time
+
+                # opencode: Calculate rewards with phase-specific logic
+                query_arm_rewards, used_any = self._calculate_arm_rewards(
+                    query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase_for_reward, clustered_scans)
+
+                # Merge query rewards into cumulative rewards
+                for idx_name, reward in query_arm_rewards.items():
+                    if idx_name not in arm_rewards:
+                        arm_rewards[idx_name] = [0, 0]
+                    arm_rewards[idx_name][0] += reward
+
+            # Add creation costs
+            for key, cost in creation_cost.items():
+                if key in arm_rewards:
+                    arm_rewards[key][1] += -1 * cost
+                else:
+                    arm_rewards[key] = [0, -1 * cost]
+
+            return execute_cost, creation_cost, arm_rewards
+        else:
+            # Legacy MSSQL mode
+            if t < configs.hyp_rounds:
+                return sql_helper.hyp_create_query_drop_v2(
+                    self.connection, constants.SCHEMA_NAME,
+                    chosen_arms, added_arms, deleted_arms, queries
+                )
+            else:
+                return sql_helper.create_query_drop_v3(
+                    self.connection, constants.SCHEMA_NAME,
+                    chosen_arms, added_arms, deleted_arms, queries
+                )
+
+    # opencode: Unified helper method for reward calculation
+    def _calculate_arm_rewards(self, query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase_for_reward, clustered_scans=None):
+        """
+        opencode: Calculate arm rewards from index usage (aligned with master branch).
+
+        Phase-specific logic:
+        - Hypothetical (is_hyp_phase=True): Simple reward, no normalization/penalty
+        - Real (is_hyp_phase=False): Normalization + clustered scan penalty
+
+        Args:
+            query: Query object with baseline tracking attribute
+            index_usage: List of tuples [(index_name, table_name, idx_cost), ...]
+            chosen_arms: Dict of chosen arms {index_name: arm}
+            baseline_attr: Attribute name for baseline tracking ('table_scan_times' or 'table_scan_times_hyp')
+            total_cost: Total query cost for penalty when no indexes used
+            is_hyp_phase_for_reward: If True, use simple reward (no normalization/penalty)
+            clustered_scans: Dict of {table_name: clustered_scan_cost} for penalty and baseline update
+
+        Returns:
+            Tuple of (arm_rewards dict, used_any bool)
+        """
+        arm_rewards = {}
+        used_any = False
+
+        if clustered_scans is None:
+            clustered_scans = {}
+
+        # opencode: table_counts only needed in real phase
+        table_counts = {}
+        if not is_hyp_phase_for_reward:
+            for idx_name, table_name, idx_cost in index_usage:
+                if table_name not in table_counts:
+                    table_counts[table_name] = 0
+                table_counts[table_name] += 1
+
+        # Get baseline dict from query
+        baseline_dict = getattr(query, baseline_attr, {})
+
+        # Calculate reward per index
+        for idx_name, table_name, idx_cost in index_usage:
+            if idx_name in chosen_arms:
+                used_any = True
+
+                # Get baseline for this table
+                table_baseline = baseline_dict.get(table_name, [])
+
+                if table_baseline:
+                    # Calculate improvement: baseline - current_cost (same as master)
+                    temp_reward = max(table_baseline) - idx_cost
+                else:
+                    # First time seeing this table - use negative cost as reward
+                    temp_reward = -1 * idx_cost
+
+                # opencode: Phase-specific reward modification (aligned with master)
+                if not is_hyp_phase_for_reward:
+                    # Real phase: normalize by table_counts and apply clustered penalty
+                    if table_counts.get(table_name, 0) > 0:
+                        temp_reward = temp_reward / table_counts[table_name]
+
+                    if table_name in clustered_scans:
+                        temp_reward -= clustered_scans[table_name] / table_counts[table_name]
+                # Hypothetical phase: no normalization or penalty (simple reward)
+
+                if idx_name not in arm_rewards:
+                    arm_rewards[idx_name] = 0
+                arm_rewards[idx_name] += temp_reward
+
+        # opencode: Update baseline for next round with CLUSTERED/SEQ SCAN costs (aligned with master)
+        # opencode: Store seq scan costs (PostgreSQL baseline) for reward calculation
+        for c_table, c_cost in clustered_scans.items():
+            if len(baseline_dict.get(c_table, [])) < constants.TABLE_SCAN_TIME_LENGTH:
+                if c_table not in baseline_dict:
+                    baseline_dict[c_table] = []
+                baseline_dict[c_table].append(c_cost)
+
+        # If no indexes used in plan - apply penalty to all chosen (same as master logic)
+        if not used_any and chosen_arms:
+            penalty = -1 * total_cost / len(chosen_arms)
+            for idx_name in chosen_arms.keys():
+                if idx_name not in arm_rewards:
+                    arm_rewards[idx_name] = 0
+                arm_rewards[idx_name] += penalty
+
+        return arm_rewards, used_any
+
+    # opencode: NEW METHOD - Bulk drop index
+    def bulk_drop_index(self, bandit_arms):
+        """Drop multiple indexes - adapter or legacy."""
+        if self.uses_adapter:
+            for index_name, bandit_arm in bandit_arms.items():
+                self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)
+        else:
+            sql_helper.bulk_drop_index(self.connection, constants.SCHEMA_NAME, bandit_arms)
+
+    # opencode: NEW METHOD - Restart server
+    def restart_server(self):
+        """Restart server - adapter or legacy."""
+        if self.uses_adapter and hasattr(self, 'use_optimizer_costs') and not self.use_optimizer_costs:
+            self.db.restart_server()
+        elif self.uses_adapter:
+            logging.info("Skipping server restart (optimizer cost mode - no state to clear)")
+        else:
+            sql_helper.restart_sql_server()
+
+    # opencode: NEW METHOD - Create query for PostgreSQL
+    def create_query_postgres(self, query_id, query_string, predicates, payloads, time_stamp):
+        print(f"DEBUG: Inside _create_query_postgres for query_id={query_id}", flush=True)
+
+        predicates_normalized = normalize_dict_keys(predicates)
+        payloads_normalized = normalize_dict_keys(payloads)
+
+        # Create a minimal Query-like object manually
+        query = Query.__new__(Query)
+        query.id = query_id
+        query.predicates = predicates_normalized
+        query.payload = payloads_normalized
+        query.group_by = {}
+        query.order_by = {}
+
+        # Use adapter to get selectivity (with normalized keys)
+        query.selectivity = self.db.get_selectivity(query_string, predicates_normalized)
+
+        query.query_string = query_string
+        query.frequency = 1
+        query.last_seen_round = time_stamp
+        query.first_seen_round = time_stamp
+
+        # Initialize scan time structures
+        tables = self.db.get_tables()
+        query.table_scan_times = {t: [] for t in tables.keys()}
+        query.index_scan_times = {t: [] for t in tables.keys()}
+        query.table_scan_times_hyp = {t: [] for t in tables.keys()}
+        query.index_scan_times_hyp = {t: [] for t in tables.keys()}
+        query.context = None
+
+        return query
+
+# opencode: Helper functions for generate_experiment_config_name()
+def sanitize_config_value(s):
+    """Sanitize a string value for use in config folder names."""
+    if s is None:
+        return "none"
+    s = str(s)
+    s = s.replace('/', '_').replace('\\', '_').replace(':', '_')
+    s = s.replace('__', '_')
+    return s
+
+def get_index_mode(rounds, hyp_rounds, use_real_indexes):
+    """Determine the exploration mode string based on parameters."""
+    if hyp_rounds == 0:
+        exploration = "no_hyp_explore"
+    else:
+        exploration = f"hyp_explore_{hyp_rounds}"
+
+    if use_real_indexes:
+        exploration += "_real"
+
+    return exploration
+
+# opencode: NEW FUNCTION - Generate experiment config folder name
 def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, reps, alpha, lambda_param, workload_file, use_real_indexes=False):
     """
     Generate a unique config folder name based on experiment parameters.
-    
+
     Format: <experiment_id>__<mode>__rounds-<N>__reps-<N>__alpha-<X>__lambda-<Y>__workload-<name>__db-<type>
-    
+
     :param experiment_id: base experiment ID from config
     :param db_type: database type (postgresql, mssql)
     :param rounds: number of rounds
@@ -542,45 +679,22 @@ def generate_experiment_config_name(experiment_id, db_type, rounds, hyp_rounds, 
     :return: sanitized config folder name
     """
     import os
-    
-    def sanitize(s):
-        if s is None:
-            return "none"
-        s = str(s)
-        s = s.replace('/', '_').replace('\\', '_').replace(':', '_')
-        s = s.replace('__', '_')
-        return s
-    
-    def get_index_mode(rounds, hyp_rounds, use_real_indexes):
-        if hyp_rounds == 0:
-            exploration = "no_hyp_explore"
-        else:
-            exploration = f"hyp_explore_{hyp_rounds}"
-        
-        if use_real_indexes:
-            exploration += "_real"
-        
-        return exploration
-    
-    workload_name = sanitize(os.path.basename(workload_file).replace('.json', ''))
+
+    workload_name = sanitize_config_value(os.path.basename(workload_file).replace('.json', ''))
     mode = get_index_mode(rounds, hyp_rounds, use_real_indexes)
-    db = sanitize(db_type)
-    
+    db = sanitize_config_value(db_type)
+
     config_name = f"{experiment_id}__{mode}__rounds-{rounds}__reps-{reps}__alpha-{alpha}__lambda-{lambda_param}__workload-{workload_name}__db-{db}"
     return config_name
 
-
+# opencode: NEW FUNCTION - Generate timestamp for experiment run
 def get_run_timestamp():
-    """
-    Generate a timestamp for the experiment run.
-    Format: YYYYMMDD_HHMMSS
-    """
+    """Generate a timestamp for the experiment run. Format: YYYYMMDD_HHMMSS"""
     from datetime import datetime
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-
+# opencode: NEW FUNCTION - Parse command line arguments
 def parse_args():
-    """Parse command line arguments."""
     import argparse
     parser = argparse.ArgumentParser(
         description='C3UCB Bandit Simulator for Database Index Selection',
@@ -589,30 +703,30 @@ def parse_args():
 Examples:
   # Run with PostgreSQL (default)
   python sim_c3ucb_vR.py
-  
+
   # Run with explicit PostgreSQL
   python sim_c3ucb_vR.py --db-type postgresql
-  
+
   # Run with MSSQL
   python sim_c3ucb_vR.py --db-type mssql
-  
+
   # Custom connection parameters
   python sim_c3ucb_vR.py --db-type postgresql --db-server myhost --db-name tpch
-  
+
   # Override experiment parameters from command line
   python sim_c3ucb_vR.py --rounds 10 --reps 2 --hyp-rounds 5 --max-memory 50000
-  
+
   # Use actual query execution (slower but real metrics)
   python sim_c3ucb_vR.py --no-optimizer-costs
-  
+
   # Custom bandit parameters
   python sim_c3ucb_vR.py --alpha 2.0 --lambda 0.3
-  
+
   # Use specific workload file
   python sim_c3ucb_vR.py --workload /resources/workloads/tpc_h_static_100_postgresql.json
         """
     )
-    
+
     parser.add_argument(
         '--db-type',
         choices=['postgresql', 'postgres', 'mssql', 'sqlserver'],
@@ -756,76 +870,94 @@ Examples:
         default=0.001,
         help='Size multiplier (seconds per MB) when --hyp-cost-mode=size'
     )
+    parser.add_argument(
+        '--include-hyp-cost',
+        action='store_true',
+        default=False,
+        help='Include estimated creation cost for hypothetical indexes (uses --hyp-cost-mode)'
+    )
+
+    parser.add_argument(
+        '--no-file-log',
+        action='store_true',
+        dest='no_file_log',
+        help='Disable log file, plots, and tables - console only output (for quick debugging)'
+    )
+    parser.add_argument(
+        '--minimal',
+        action='store_true',
+        dest='no_file_log',  # Same as --no-file-log
+        help='Minimal mode: disable all file output (alias for --no-file-log)'
+    )
 
     return parser.parse_args()
-
 
 if __name__ == "__main__":
     # Parse command line arguments
     args = parse_args()
-    
+
     # Determine database type
     db_type = args.db_type.lower()
     use_postgres = db_type in ['postgresql', 'postgres']
-    
+
     # Reload configs first, then override with CLI arguments
     reload(configs)
-    
+
     # Override experiment ID if specified
     if args.experiment:
         configs.experiment_id = args.experiment
         print(f"Using experiment ID: {args.experiment}")
-    
+
     # Override config values with CLI arguments (applied after reload)
     if args.hyp_rounds is not None:
         configs.hyp_rounds = args.hyp_rounds
         print(f"Using hyp_rounds from CLI: {args.hyp_rounds}")
-    
+
     if args.rounds is not None:
         configs.rounds = args.rounds
         print(f"Using rounds from CLI: {args.rounds}")
-    
+
     # Apply --use-real-indexes flag (default: False, meaning use hypothetical in rounds phase)
     configs.use_real_indexes_in_rounds = args.use_real_indexes
     if configs.use_real_indexes_in_rounds:
         print("Using --use-real-indexes: Rounds phase will use real indexes")
     else:
         print("Rounds phase will use hypothetical indexes (default)")
-    
+
     if args.reps is not None:
         configs.reps = args.reps
         print(f"Using reps from CLI: {args.reps}")
-    
+
     if args.workload is not None:
         configs.workload_file = args.workload
         print(f"Using workload from CLI: {args.workload}")
-    
+
     if args.alpha is not None:
         configs.input_alpha = args.alpha
         print(f"Using alpha from CLI: {args.alpha}")
-    
+
     if args.lambda_param is not None:
         configs.input_lambda = args.lambda_param
         print(f"Using lambda from CLI: {args.lambda_param}")
-    
+
     if args.max_memory is not None:
         configs.max_memory = args.max_memory
         print(f"Using max_memory from CLI: {args.max_memory}")
-    
+
     # Apply --no-cluster-filter flag
     if args.no_cluster_filter:
         configs.enable_cluster_filter = False
         print("Cluster-based arm filtering disabled")
     else:
-        print(f"Cluster-based arm filtering enabled (default)")
-    
+        print("Cluster-based arm filtering enabled (default)")
+
     # Apply --no-query-overlap-filter flag
     if args.no_query_overlap_filter:
         configs.enable_query_overlap_filter = False
         print("Query overlap filtering disabled")
     else:
         print(f"Query overlap filtering enabled (default)")
-    
+
     # Apply --hyp-cost-mode flag
     if args.hyp_cost_mode:
         configs.hyp_cost_mode = args.hyp_cost_mode
@@ -839,20 +971,20 @@ if __name__ == "__main__":
                 print(f"  Size multiplier: {configs.hyp_cost_size_multiplier} s/MB")
     else:
         print(f"Hypo index creation cost mode: none (default)")
-    
+
     # Create database adapter with command line overrides
     if use_postgres:
         import configparser
         print(f"Using PostgreSQL database (type: {db_type})")
-        
+
         # Read config file to get default values
         config_path = constants.ROOT_DIR + constants.DB_CONFIG
         db_config = configparser.ConfigParser()
         db_config.read(config_path)
-        
+
         # Get default values from config, fallback to PostgreSQL defaults if section missing
         config_db_type = db_config.get('SYSTEM', 'db_type', fallback='MSSQL')
-        
+
         # Build connection parameters with config defaults, allowing command-line overrides
         # Default PostgreSQL connection: Unix socket at /tmp, port 51204, user sclai
         db_params = {
@@ -867,15 +999,16 @@ if __name__ == "__main__":
             'hyp_cost_mode': configs.hyp_cost_mode,
             'hyp_cost_fixed': configs.hyp_cost_fixed,
             'hyp_cost_size_multiplier': configs.hyp_cost_size_multiplier,
+            'include_hyp_cost': args.include_hyp_cost,
         }
-        
+
         # Always use create_db_adapter_with_params when use_postgres is True
         from database import create_db_adapter_with_params
         db = create_db_adapter_with_params(**db_params)
-        
+
         db.connect()
         print(f"Connected to {db_type}")
-        
+
         # Enable HypoPG for hypothetical indexes if available
         hypopg_available = False
         if hasattr(db, 'enable_hypopg'):
@@ -895,31 +1028,30 @@ if __name__ == "__main__":
             if configs.hyp_rounds != 0:
                 print("Setting hyp_rounds = 0 (no HypoPG support)")
                 configs.hyp_rounds = 0
-        
+
         # Auto-detect PostgreSQL workload if using PostgreSQL
         if use_postgres and 'postgresql' not in configs.workload_file.lower():
             pg_workload = configs.workload_file.replace('.json', '_postgresql.json')
             if os.path.exists(pg_workload):
                 configs.workload_file = pg_workload
                 print(f"Using PostgreSQL workload: {pg_workload}")
-        
+
         # Determine execution mode (--no-optimizer-costs means use real execution)
         use_optimizer = not args.no_optimizer_costs
         if use_optimizer:
             print("Using optimizer cost estimation mode (EXPLAIN costs, no actual query execution)")
         else:
             print("Using actual query execution mode (slower but real metrics)")
-        
+
         # If using real execution, ensure hyp_rounds doesn't conflict
         if not use_optimizer and configs.hyp_rounds > 0:
             print(f"Note: hyp_rounds={configs.hyp_rounds} will be applied (HypoPG for exploration)")
 
-        
         simulator = Simulator(db_adapter=db, hypopg_available=hypopg_available, use_optimizer_costs=use_optimizer)
     else:
-        print(f"Using MSSQL database (legacy mode)")
+        print("Using MSSQL database (legacy mode)")
         simulator = Simulator()
-    
+
     # Generate experiment config name and timestamp for output folder structure
     config_folder_name = generate_experiment_config_name(
         experiment_id=configs.experiment_id,
@@ -931,28 +1063,31 @@ if __name__ == "__main__":
         lambda_param=configs.input_lambda,
         workload_file=configs.workload_file,
         use_real_indexes=configs.use_real_indexes_in_rounds
-    )
-    
+)
+
     run_timestamp = get_run_timestamp()
-    
-    # Create config folder (contains all runs with same configuration)
-    config_folder = helper.get_config_folder_path(config_folder_name)
-    print(f"Config folder: {config_folder}")
-    
-    # Create run folder (specific timestamp for this run)
-    run_folder = helper.get_experiment_folder_path(config_folder_name, run_timestamp)
-    print(f"Run folder: {run_folder}")
-    
+
+    # Create config and run folders - only if NOT minimal mode
+    if not args.no_file_log:
+        config_folder = helper.get_config_folder_path(config_folder_name)
+        print(f"Config folder: {config_folder}")
+        run_folder = helper.get_experiment_folder_path(config_folder_name, run_timestamp)
+        print(f"Run folder: {run_folder}")
+    else:
+        config_folder = None
+        run_folder = None
+
     # Update logging to use new path (both file and console output)
     root = logging.getLogger()
     root.handlers = []
 
-    # File handler
-    fh = logging.FileHandler(run_folder + configs.experiment_id + '.log', mode='w')
-    fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    root.addHandler(fh)
+    # File handler (optional, disabled with --no-file-log / --minimal)
+    if not args.no_file_log:
+        fh = logging.FileHandler(run_folder + configs.experiment_id + '.log', mode='w')
+        fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        root.addHandler(fh)
 
-    # Console handler
+    # Console handler (always enabled)
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     root.addHandler(sh)
@@ -967,51 +1102,56 @@ if __name__ == "__main__":
     logging.getLogger().setLevel(log_level)
     logging.info(f"Experiment config: {config_folder_name}")
     logging.info(f"CLI args: {vars(args)}")
-    
+
     # Running MAB
     print(f"\nRunning experiment: {configs.experiment_id}")
     print(f"Config: {config_folder_name}")
     print(f"Rounds: {configs.rounds}, Reps: {configs.reps}")
     print("-" * 60)
-    
+
     exp_report_mab = ExpReport(configs.experiment_id, constants.COMPONENT_MAB, configs.reps, configs.rounds)
-    
+
     for r in range(configs.reps):
         print(f"\n--- Repetition {r + 1}/{configs.reps} ---")
-        
+
         if not use_postgres:
             simulator = Simulator()  # Recreate for each rep in legacy mode
-        
+
         sim_results, total_workload_time = simulator.run()
-        
+
         temp = DataFrame(sim_results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                                constants.DF_COL_MEASURE_VALUE])
         temp = pd.concat([temp, pd.DataFrame([[-1, constants.MEASURE_TOTAL_WORKLOAD_TIME, total_workload_time]], 
                                               columns=temp.columns)])
         temp[constants.DF_COL_REP] = r
         exp_report_mab.add_data_list(temp)
-    
+
     # Disconnect if using adapter
     if use_postgres and 'db' in locals():
         db.disconnect()
         print("\nDisconnected from database")
-    
+
     print("\n" + "=" * 60)
-    print("Generating plots and reports...")
-    
-    # plot line graphs with timestamp and config folder name
-    helper.plot_exp_report(
-        configs.experiment_id, [exp_report_mab],
-        (constants.MEASURE_BATCH_TIME, constants.MEASURE_QUERY_EXECUTION_COST),
-        timestamp=run_timestamp,
-        config_folder_name=config_folder_name
-    )
-    
-    # create comparison table
-    helper.create_comparison_tables(
-        configs.experiment_id, [exp_report_mab],
-        timestamp=run_timestamp,
-        config_folder_name=config_folder_name
-    )
-    
-    print(f"✓ Experiment complete! Results in: {run_folder}")
+
+    # Generate plots and reports - only if NOT minimal mode
+    if not args.no_file_log:
+        print("Generating plots and reports...")
+
+        # plot line graphs with timestamp and config folder name
+        helper.plot_exp_report(
+            configs.experiment_id, [exp_report_mab],
+            (constants.MEASURE_BATCH_TIME, constants.MEASURE_QUERY_EXECUTION_COST),
+            timestamp=run_timestamp,
+            config_folder_name=config_folder_name
+        )
+
+        # create comparison table
+        helper.create_comparison_tables(
+            configs.experiment_id, [exp_report_mab],
+            timestamp=run_timestamp,
+            config_folder_name=config_folder_name
+        )
+
+        print(f"✓ Experiment complete! Results in: {run_folder}")
+    else:
+        print("✓ Experiment complete! (minimal mode - no output files)")
