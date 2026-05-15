@@ -2,6 +2,8 @@ import datetime
 import logging
 import operator
 import pprint
+import sys
+import os
 from collections import defaultdict
 from importlib import reload
 
@@ -23,12 +25,27 @@ from bandits.query_v5 import Query
 # Simulation built on vO to work on dynamic workloads
 
 
+# opencode: NEW FUNCTION - Parse command line arguments
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='Run DDQN simulation')
+    # opencode: NEW ARG - Disable file logging
+    parser.add_argument('--no-file-log', action='store_true',
+                        help='Disable log file generation, only output to console')
+    return parser.parse_args()
+
+
+# opencode: NEW CLASS - Base simulator with optional file logging
 class BaseSimulator:
-    def __init__(self):
+    # opencode: NEW METHOD - Initialize with optional file logging
+    def __init__(self, no_file_log=False):
         # configuring the logger
-        logging.basicConfig(
-            filename=helper.get_experiment_folder_path(configs.experiment_id) + configs.experiment_id + '.log',
-            filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+        if not no_file_log:
+            logging.basicConfig(
+                filename=helper.get_experiment_folder_path(configs.experiment_id) + configs.experiment_id + '.log',
+                filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+        else:
+            logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
         logging.getLogger().setLevel(logging.INFO)
 
         # Get the query List
@@ -275,10 +292,13 @@ class Simulator(BaseSimulator):
 
 
 if __name__ == "__main__":
+    # Parse args
+    args = parse_args()
+    
     # Running MAB
     exp_report_mab = ExpReport(configs.experiment_id, constants.COMPONENT_MAB, configs.reps, configs.rounds)
     for r in range(configs.reps):
-        simulator = Simulator()
+        simulator = Simulator(no_file_log=args.no_file_log)
         results, total_workload_time = simulator.run()
         temp = DataFrame(results, columns=[constants.DF_COL_BATCH, constants.DF_COL_MEASURE_NAME,
                                            constants.DF_COL_MEASURE_VALUE])

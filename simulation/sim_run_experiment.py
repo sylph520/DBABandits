@@ -22,7 +22,9 @@ from shared import configs_v2 as configs, helper
 import configparser
 
 
+# opencode: NEW FUNCTION - Parse command line arguments
 def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Run MAB experiment simulations')
     parser.add_argument('--db-type', type=str, default='postgresql',
                         choices=['postgresql', 'postgres', 'mssql', 'sqlserver'],
@@ -39,9 +41,13 @@ def parse_args():
                         help='Database port')
     parser.add_argument('--db-schema', type=str, default=None,
                         help='Database schema')
+    # opencode: NEW ARG - Disable file logging
+    parser.add_argument('--no-file-log', action='store_true',
+                        help='Disable log file generation, only output to console')
     return parser.parse_args()
 
 
+# opencode: NEW FUNCTION - Main entry point
 def main():
     args = parse_args()
 
@@ -117,9 +123,13 @@ def main():
 
             # configuring the logger
             if not FROM_FILE:
-                logging.basicConfig(
-                    filename=experiment_folder_path + configs.experiment_id + '.log',
-                    filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+                if not args.no_file_log:
+                    logging.basicConfig(
+                        filename=experiment_folder_path + configs.experiment_id + '.log',
+                        filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+                else:
+                    logging.basicConfig(
+                        format='%(asctime)s - %(levelname)s - %(message)s')
                 logging.getLogger().setLevel(constants.LOGGING_LEVEL)
 
             if FROM_FILE:
