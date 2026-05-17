@@ -96,7 +96,8 @@ def main():
     # Generate form saved reports
     FROM_FILE = False
     SEPARATE_EXPERIMENTS = True
-    PLOT_LOG_Y = False
+    # opencode: Enable log scale because cost scales vary by orders of magnitude
+    PLOT_LOG_Y = True
     PLOT_MEASURE = (constants.MEASURE_BATCH_TIME, constants.MEASURE_QUERY_EXECUTION_COST,
                     constants.MEASURE_INDEX_CREATION_COST)
     UNIFORM = False

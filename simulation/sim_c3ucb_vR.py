@@ -81,6 +81,8 @@ class BaseSimulator:
         self.hypopg_available = hypopg_available
         # opencode: NEW ATTRIBUTE - Use optimizer costs mode
         self.use_optimizer_costs = use_optimizer_costs
+        # opencode: Unit for cost values: 's' for MSSQL/actual execution, 'cost_units' for PostgreSQL planner
+        self.cost_unit = 's'
 
         # Get the query List
         self.queries = helper.get_queries_v2()
@@ -317,7 +319,7 @@ class Simulator(BaseSimulator):
                 'deleted': list(key_deletions),
                 'total_memory_mb': sum(a.memory for a in chosen_arms.values()) if chosen_arms else 0
             }
-            logging.info(f"Round {t}: execute_cost={time_taken:.2f}s, creation_cost={creation_cost:.2f}s, "
+            logging.info(f"Round {t}: execute_cost={time_taken:.2f} {self.cost_unit}, creation_cost={creation_cost:.2f} {self.cost_unit}, "
                          f"indexes={index_config}, rewards={arm_rewards}")
             if t == configs.hyp_rounds and configs.hyp_rounds != 0:
                 # logging arm usage counts
@@ -470,9 +472,10 @@ class Simulator(BaseSimulator):
                     for c in c_usage:
                         clustered_scans[c.table_name] = c.elapsed_time
 
-                # opencode: Calculate rewards with phase-specific logic
-                query_arm_rewards, used_any = self._calculate_arm_rewards(
-                    query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase_for_reward, clustered_scans)
+                # opencode: Calculate rewards with marginal contribution
+                query_arm_rewards, used_any = self._calculate_arm_rewards_marginal(
+                    query, index_usage, chosen_arms, baseline_attr, total_cost,
+                    is_hyp_phase, clustered_scans)
 
                 # Merge query rewards into cumulative rewards
                 for idx_name, reward in query_arm_rewards.items():
@@ -501,23 +504,27 @@ class Simulator(BaseSimulator):
                     chosen_arms, added_arms, deleted_arms, queries
                 )
 
-    # opencode: Unified helper method for reward calculation
-    def _calculate_arm_rewards(self, query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase_for_reward, clustered_scans=None):
+    # opencode: NEW METHOD - Marginal contribution reward calculation
+    def _calculate_arm_rewards_marginal(self, query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase, clustered_scans=None):
         """
-        opencode: Calculate arm rewards from index usage (aligned with master branch).
+        opencode: Calculate arm rewards using marginal contribution.
 
-        Phase-specific logic:
-        - Hypothetical (is_hyp_phase=True): Simple reward, no normalization/penalty
-        - Real (is_hyp_phase=False): Normalization + clustered scan penalty
+        For each chosen arm, measures the cost reduction when that arm is present vs absent.
+        This preserves Option A's root-cost stability while giving per-arm differentiation.
+
+        Fixes applied:
+        - P1: Log-transform marginal rewards to handle 10+ order-of-magnitude scale differences
+        - P2: Cap marginal contribution at 3x average to prevent "winner takes all" dynamics
+        - P3: Zero-marginal arms get a small baseline-based reward instead of 0
 
         Args:
-            query: Query object with baseline tracking attribute
+            query: Query object with root_plan_cost_baseline attribute
             index_usage: List of tuples [(index_name, table_name, idx_cost), ...]
             chosen_arms: Dict of chosen arms {index_name: arm}
-            baseline_attr: Attribute name for baseline tracking ('table_scan_times' or 'table_scan_times_hyp')
-            total_cost: Total query cost for penalty when no indexes used
-            is_hyp_phase_for_reward: If True, use simple reward (no normalization/penalty)
-            clustered_scans: Dict of {table_name: clustered_scan_cost} for penalty and baseline update
+            baseline_attr: Attribute name for baseline tracking
+            total_cost: Root plan Total Cost with all arms present
+            is_hyp_phase: If True (during hyp_rounds), use simple reward (no marginal calc)
+            clustered_scans: Dict of {table_name: clustered_scan_cost}
 
         Returns:
             Tuple of (arm_rewards dict, used_any bool)
@@ -525,64 +532,150 @@ class Simulator(BaseSimulator):
         arm_rewards = {}
         used_any = False
 
-        if clustered_scans is None:
-            clustered_scans = {}
+        # opencode: Get baseline root plan cost for this query
+        baseline_list = getattr(query, 'root_plan_cost_baseline', [])
 
-        # opencode: table_counts only needed in real phase
-        table_counts = {}
-        if not is_hyp_phase_for_reward:
-            for idx_name, table_name, idx_cost in index_usage:
-                if table_name not in table_counts:
-                    table_counts[table_name] = 0
-                table_counts[table_name] += 1
+        if baseline_list:
+            baseline_root = max(baseline_list)
+        else:
+            baseline_root = total_cost
 
-        # Get baseline dict from query
-        baseline_dict = getattr(query, baseline_attr, {})
+        # opencode: Update baseline with current root cost
+        if len(baseline_list) < constants.TABLE_SCAN_TIME_LENGTH:
+            baseline_list.append(total_cost)
 
-        # Calculate reward per index
-        for idx_name, table_name, idx_cost in index_usage:
-            if idx_name in chosen_arms:
-                used_any = True
+        if not chosen_arms:
+            return arm_rewards, used_any
 
-                # Get baseline for this table
-                table_baseline = baseline_dict.get(table_name, [])
-
-                if table_baseline:
-                    # Calculate improvement: baseline - current_cost (same as master)
-                    temp_reward = max(table_baseline) - idx_cost
-                else:
-                    # First time seeing this table - use negative cost as reward
-                    temp_reward = -1 * idx_cost
-
-                # opencode: Phase-specific reward modification (aligned with master)
-                if not is_hyp_phase_for_reward:
-                    # Real phase: normalize by table_counts and apply clustered penalty
-                    if table_counts.get(table_name, 0) > 0:
-                        temp_reward = temp_reward / table_counts[table_name]
-
-                    if table_name in clustered_scans:
-                        temp_reward -= clustered_scans[table_name] / table_counts[table_name]
-                # Hypothetical phase: no normalization or penalty (simple reward)
-
-                if idx_name not in arm_rewards:
-                    arm_rewards[idx_name] = 0
-                arm_rewards[idx_name] += temp_reward
-
-        # opencode: Update baseline for next round with CLUSTERED/SEQ SCAN costs (aligned with master)
-        # opencode: Store seq scan costs (PostgreSQL baseline) for reward calculation
-        for c_table, c_cost in clustered_scans.items():
-            if len(baseline_dict.get(c_table, [])) < constants.TABLE_SCAN_TIME_LENGTH:
-                if c_table not in baseline_dict:
-                    baseline_dict[c_table] = []
-                baseline_dict[c_table].append(c_cost)
-
-        # If no indexes used in plan - apply penalty to all chosen (same as master logic)
-        if not used_any and chosen_arms:
-            penalty = -1 * total_cost / len(chosen_arms)
+        # opencode: In hyp_rounds phase or no baseline, use equal distribution (marginal needs stable baseline)
+        if is_hyp_phase or not baseline_list:
+            used_any = True
+            query_reward = baseline_root - total_cost
+            per_arm = query_reward / len(chosen_arms)
             for idx_name in chosen_arms.keys():
-                if idx_name not in arm_rewards:
-                    arm_rewards[idx_name] = 0
-                arm_rewards[idx_name] += penalty
+                arm_rewards[idx_name] = per_arm
+            return arm_rewards, used_any
+
+        # opencode: Marginal contribution calculation
+        # For each arm, temporarily drop it and measure cost difference
+        cost_with_all = total_cost
+        marginal_rewards = {}
+
+        for arm_name, arm in chosen_arms.items():
+            # Temporarily drop this arm
+            self.db.drop_index(arm.table_name, arm_name)
+
+            # Get cost without this arm
+            try:
+                plan_without = self.db.get_query_plan(query.query_string, use_analyze=False)
+                cost_without = plan_without.est_statement_sub_tree_cost
+            except Exception as e:
+                logging.warning(f"Failed to get plan without {arm_name}: {e}")
+                cost_without = cost_with_all
+            finally:
+                # Re-create the arm
+                self.db.create_index(arm.table_name, arm.index_cols, arm_name, arm.include_cols)
+
+            # Marginal contribution = cost without arm - cost with all arms
+            # Positive means the arm helped reduce cost
+            marginal = cost_without - cost_with_all
+            marginal_rewards[arm_name] = marginal
+
+        # opencode: P1 - Apply log-transform to stabilize reward scale
+        # Raw marginals span 10+ orders of magnitude (e.g., 7 to 187 billion)
+        # Log-transform compresses this range while preserving ordering
+        positive_marginals = [m for m in marginal_rewards.values() if m > 0]
+        if positive_marginals:
+            log_marginals = {}
+            for arm_name, marginal in marginal_rewards.items():
+                if marginal > 0:
+                    # log1p ensures small positive values get meaningful scores
+                    log_marginals[arm_name] = numpy.log1p(marginal)
+                else:
+                    log_marginals[arm_name] = 0.0
+
+            # opencode: P2 - Cap log-marginal at 3x average to prevent "winner takes all"
+            avg_log = numpy.mean([v for v in log_marginals.values() if v > 0]) if any(v > 0 for v in log_marginals.values()) else 1.0
+            cap = 3.0 * avg_log
+            for arm_name in log_marginals:
+                if log_marginals[arm_name] > cap:
+                    log_marginals[arm_name] = cap
+
+            # opencode: Distribute baseline improvement proportionally to log-transformed marginals
+            total_log = sum(v for v in log_marginals.values() if v > 0)
+            if total_log > 0:
+                used_any = True
+                query_reward = baseline_root - cost_with_all
+                for arm_name, log_marginal in log_marginals.items():
+                    if log_marginal > 0:
+                        # Proportional share based on log-transformed marginal contribution
+                        arm_rewards[arm_name] = query_reward * (log_marginal / total_log)
+                    else:
+                        # opencode: P3 - Zero-marginal arms get a small baseline-based reward
+                        # Instead of 0, give them a tiny fraction to keep them in contention
+                        arm_rewards[arm_name] = query_reward * 0.01 / max(len(chosen_arms), 1)
+            else:
+                # Fallback: no positive marginals, use equal distribution
+                used_any = True
+                query_reward = baseline_root - cost_with_all
+                per_arm = query_reward / len(chosen_arms)
+                for idx_name in chosen_arms.keys():
+                    arm_rewards[idx_name] = per_arm
+        else:
+            # Fallback: no positive marginals, use equal distribution
+            used_any = True
+            query_reward = baseline_root - cost_with_all
+            per_arm = query_reward / len(chosen_arms)
+            for idx_name in chosen_arms.keys():
+                arm_rewards[idx_name] = per_arm
+
+        return arm_rewards, used_any
+
+    # opencode: DEPRECATED METHOD - Kept for backward compatibility
+    def _calculate_arm_rewards(self, query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase_for_reward, clustered_scans=None):
+        """
+        opencode: Calculate arm rewards from root plan cost comparison.
+        DEPRECATED: Use _calculate_arm_rewards_marginal instead.
+
+        Uses the root plan's Total Cost as the baseline instead of per-index costs.
+        This avoids PostgreSQL's cumulative cost semantics where Index Scan Total Cost
+        includes loop multiplication and varies with plan structure.
+
+        Args:
+            query: Query object with root_plan_cost_baseline attribute
+            index_usage: List of tuples [(index_name, table_name, idx_cost), ...] (unused in Option A)
+            chosen_arms: Dict of chosen arms {index_name: arm}
+            baseline_attr: Attribute name for baseline tracking
+            total_cost: Root plan Total Cost for this query
+            is_hyp_phase_for_reward: If True, use simple reward
+            clustered_scans: Dict of {table_name: clustered_scan_cost} (unused in Option A)
+
+        Returns:
+            Tuple of (arm_rewards dict, used_any bool)
+        """
+        arm_rewards = {}
+        used_any = False
+
+        # opencode: Get baseline root plan cost for this query
+        baseline_list = getattr(query, 'root_plan_cost_baseline', [])
+
+        if baseline_list:
+            baseline_root = max(baseline_list)
+            query_reward = baseline_root - total_cost
+        else:
+            # First time seeing this query - use negative cost as reward
+            query_reward = -1 * total_cost
+
+        # opencode: Update baseline with current root cost
+        if len(baseline_list) < constants.TABLE_SCAN_TIME_LENGTH:
+            baseline_list.append(total_cost)
+
+        # opencode: Distribute reward equally among chosen arms
+        if chosen_arms:
+            used_any = True
+            per_arm = query_reward / len(chosen_arms)
+            for idx_name in chosen_arms.keys():
+                arm_rewards[idx_name] = per_arm
 
         return arm_rewards, used_any
 
@@ -634,6 +727,8 @@ class Simulator(BaseSimulator):
         query.index_scan_times = {t: [] for t in tables.keys()}
         query.table_scan_times_hyp = {t: [] for t in tables.keys()}
         query.index_scan_times_hyp = {t: [] for t in tables.keys()}
+        # opencode: Root plan cost baseline for stable reward calculation (PostgreSQL)
+        query.root_plan_cost_baseline = []
         query.context = None
 
         return query
@@ -1048,6 +1143,8 @@ if __name__ == "__main__":
             print(f"Note: hyp_rounds={configs.hyp_rounds} will be applied (HypoPG for exploration)")
 
         simulator = Simulator(db_adapter=db, hypopg_available=hypopg_available, use_optimizer_costs=use_optimizer)
+        if use_optimizer:
+            simulator.cost_unit = 'cost_units'  # PostgreSQL planner cost units
     else:
         print("Using MSSQL database (legacy mode)")
         simulator = Simulator()
@@ -1138,9 +1235,11 @@ if __name__ == "__main__":
         print("Generating plots and reports...")
 
         # plot line graphs with timestamp and config folder name
+        # opencode: log_y=True because cost scales vary by orders of magnitude
         helper.plot_exp_report(
             configs.experiment_id, [exp_report_mab],
             (constants.MEASURE_BATCH_TIME, constants.MEASURE_QUERY_EXECUTION_COST),
+            log_y=True,
             timestamp=run_timestamp,
             config_folder_name=config_folder_name
         )
