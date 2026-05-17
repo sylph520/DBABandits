@@ -514,7 +514,6 @@ class Simulator(BaseSimulator):
 
         Fixes applied:
         - P1: Log-transform marginal rewards to handle 10+ order-of-magnitude scale differences
-        - P2: Cap marginal contribution at 3x average to prevent "winner takes all" dynamics
         - P3: Zero-marginal arms get a small baseline-based reward instead of 0
 
         Args:
@@ -593,13 +592,6 @@ class Simulator(BaseSimulator):
                     log_marginals[arm_name] = numpy.log1p(marginal)
                 else:
                     log_marginals[arm_name] = 0.0
-
-            # opencode: P2 - Cap log-marginal at 3x average to prevent "winner takes all"
-            avg_log = numpy.mean([v for v in log_marginals.values() if v > 0]) if any(v > 0 for v in log_marginals.values()) else 1.0
-            cap = 3.0 * avg_log
-            for arm_name in log_marginals:
-                if log_marginals[arm_name] > cap:
-                    log_marginals[arm_name] = cap
 
             # opencode: Distribute baseline improvement proportionally to log-transformed marginals
             total_log = sum(v for v in log_marginals.values() if v > 0)
