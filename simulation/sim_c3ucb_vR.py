@@ -414,7 +414,7 @@ class Simulator(BaseSimulator):
                 if t < configs.hyp_rounds:
                     self.db.hypopg_enabled = True
                 else:
-                    self.db.hypopg_enabled = not configs.use_real_indexes_in_rounds
+                    self.db.hypopg_enabled = not getattr(configs, 'use_real_indexes_in_rounds', False)
 
             for index_name, bandit_arm in deleted_arms.items():
                 self.db.drop_index(bandit_arm.table_name, bandit_arm.index_name)

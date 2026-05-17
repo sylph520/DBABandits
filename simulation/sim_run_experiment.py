@@ -80,7 +80,8 @@ def main():
         db_adapter.connect()
 
     # Define Experiment ID list that we need to run
-    exp_id_list = ["tpc_h_skew_static_10_MAB3"]
+    exp_id_list = ["tpc_h_postgres_hypo"]
+    # exp_id_list = ["tpc_h_skew_static_10_MAB3"]
     # exp_id_list = ["tpc_h_static_10_MAB"]  # lsc, uniform static
 
     # Comparing components
