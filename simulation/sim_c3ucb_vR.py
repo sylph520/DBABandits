@@ -345,12 +345,14 @@ class Simulator(BaseSimulator):
             # keeping track of queries that we saw last time
             chosen_arms_last_round = chosen_arms
 
-            if t == (configs.rounds + configs.hyp_rounds - 1):
-                self.bulk_drop_index(chosen_arms)
-
+            # opencode: Measure size BEFORE cleanup drop
             end_time_round = datetime.datetime.now()
             current_config_size = float(self.get_current_pds_size())
             logging.info("Size taken by the config: " + str(current_config_size) + "MB")
+
+            if t == (configs.rounds + configs.hyp_rounds - 1):
+                self.bulk_drop_index(chosen_arms)
+
             # Adding information to the results array
             if t >= configs.hyp_rounds:
                 actual_round_number = t - configs.hyp_rounds
@@ -560,12 +562,15 @@ class Simulator(BaseSimulator):
         cost_with_all = total_cost
         marginal_rewards = {}
 
+        logging.info(f"MARGINAL: Starting marginal calc for query with {len(chosen_arms)} arms")
+
         for arm_name, arm in chosen_arms.items():
             # Temporarily drop this arm
-            self.db.drop_index(arm.table_name, arm_name)
-
-            # Get cost without this arm
             try:
+                self.db.drop_index(arm.table_name, arm_name)
+                self.db._connection.commit()  # Ensure HypoPG state is preserved
+
+                # Get cost without this arm
                 plan_without = self.db.get_query_plan(query.query_string, use_analyze=False)
                 cost_without = plan_without.est_statement_sub_tree_cost
             except Exception as e:
@@ -573,12 +578,20 @@ class Simulator(BaseSimulator):
                 cost_without = cost_with_all
             finally:
                 # Re-create the arm
-                self.db.create_index(arm.table_name, arm.index_cols, arm_name, arm.include_cols)
+                try:
+                    self.db.create_index(arm.table_name, arm.index_cols, arm_name, arm.include_cols)
+                    self.db._connection.commit()  # Ensure HypoPG state is preserved
+                except Exception as e:
+                    logging.error(f"Failed to recreate {arm_name}: {e}")
 
             # Marginal contribution = cost without arm - cost with all arms
             # Positive means the arm helped reduce cost
             marginal = cost_without - cost_with_all
             marginal_rewards[arm_name] = marginal
+
+        # opencode: Log HypoPG state after marginal calculation
+        if hasattr(self.db, 'hypothetical_indexes'):
+            logging.info(f"MARGINAL: HypoPG indexes after calc: {len(self.db.hypothetical_indexes)}")
 
         # opencode: P1 - Apply log-transform to stabilize reward scale
         # Raw marginals span 10+ orders of magnitude (e.g., 7 to 187 billion)

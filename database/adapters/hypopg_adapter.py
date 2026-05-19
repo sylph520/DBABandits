@@ -58,6 +58,8 @@ class HypoPGAdapter(PostgreSQLAdapter):
         super().__init__(connection_params)
         self.hypopg_enabled = False
         self.hypothetical_indexes: Dict[str, int] = {}  # name -> index_id
+        self._hypopg_size_cache: Dict[str, float] = {}  # index_def -> size_mb
+        self._hypopg_total_size: float = 0.0  # cached total size of all hyp indexes
         
     def connect(self) -> Any:
         """Connect and check if HypoPG is available."""
@@ -129,6 +131,7 @@ class HypoPGAdapter(PostgreSQLAdapter):
             index_id = result[0]
             
             self.hypothetical_indexes[index_name] = index_id
+            self._connection.commit()  # Ensure HypoPG state is preserved
             logging.debug(f"Created hypothetical index {index_name} (ID: {index_id})")
             
             # opencode: Optionally include estimated creation cost for hyp indexes
@@ -181,6 +184,7 @@ class HypoPGAdapter(PostgreSQLAdapter):
                 cursor = self._connection.cursor()
                 cursor.execute("SELECT hypopg_drop_index(%s)", (index_id,))
                 del self.hypothetical_indexes[index_name]
+                self._connection.commit()  # Ensure HypoPG state is preserved
                 logging.debug(f"Dropped hypothetical index {index_name}")
             except Exception as e:
                 logging.error(f"Failed to drop hypothetical index {index_name}: {e}")
@@ -294,29 +298,32 @@ class HypoPGAdapter(PostgreSQLAdapter):
                            column_names: Tuple[str, ...],
                            include_columns: Tuple[str, ...] = ()) -> float:
         """
-        Estimate index size using actual HypoPG measurement.
+        Estimate index size using actual HypoPG measurement with caching.
 
         Creates a hypothetical index, measures its size via hypopg_relation_size(),
-        then drops it. This is more accurate than the heuristic estimation in
-        PostgreSQLAdapter.
+        then drops it. Results are cached to avoid redundant measurements.
 
         opencode: Uses HypoPG for accurate size estimation during arm generation.
         """
         if not self.hypopg_enabled:
             return super().estimate_index_size(table_name, column_names, include_columns)
 
+        table_name_lower = table_name.lower()
+        column_names_lower = tuple(col.lower() for col in column_names)
+        include_columns_lower = tuple(col.lower() for col in include_columns) if include_columns else ()
+
+        # Build index definition as cache key
+        if include_columns_lower:
+            index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)}) INCLUDE ({', '.join(include_columns_lower)})"
+        else:
+            index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)})"
+
+        # Check cache first
+        if index_def in self._hypopg_size_cache:
+            return self._hypopg_size_cache[index_def]
+
         try:
             cursor = self._connection.cursor()
-
-            table_name_lower = table_name.lower()
-            column_names_lower = tuple(col.lower() for col in column_names)
-            include_columns_lower = tuple(col.lower() for col in include_columns) if include_columns else ()
-
-            # Build index definition
-            if include_columns_lower:
-                index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)}) INCLUDE ({', '.join(include_columns_lower)})"
-            else:
-                index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)})"
 
             # Create hypothetical index
             cursor.execute("SELECT (hypopg_create_index(%s)).indexrelid", (index_def,))
@@ -332,8 +339,27 @@ class HypoPGAdapter(PostgreSQLAdapter):
             # Drop the hypothetical index
             cursor.execute("SELECT hypopg_drop_index(%s)", (index_id,))
 
+            # Cache the result
+            self._hypopg_size_cache[index_def] = size_mb
+
             return size_mb
 
         except Exception as e:
             logging.warning(f"HypoPG size estimation failed for {table_name}({column_names}), falling back to heuristic: {e}")
             return super().estimate_index_size(table_name, column_names, include_columns)
+
+    def get_current_pds_size(self) -> float:
+        """
+        Get size of all hypothetical indexes currently in the session.
+
+        Delegates to parent class which uses hypopg_relation_size() when
+        use_real_indexes_in_rounds=False.
+
+        opencode: Uses parent's HypoPG-aware implementation.
+        """
+        return super().get_current_pds_size()
+
+    def clear_size_cache(self):
+        """Clear the HypoPG size cache. Call when workload changes."""
+        self._hypopg_size_cache.clear()
+        self._hypopg_total_size = 0.0
