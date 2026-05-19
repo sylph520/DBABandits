@@ -514,7 +514,7 @@ class Simulator(BaseSimulator):
 
         Fixes applied:
         - P1: Log-transform marginal rewards to handle 10+ order-of-magnitude scale differences
-        - P3: Zero-marginal arms get a small baseline-based reward instead of 0
+        - P2: Zero-marginal arms get a small baseline-based reward instead of 0
 
         Args:
             query: Query object with root_plan_cost_baseline attribute
@@ -603,7 +603,7 @@ class Simulator(BaseSimulator):
                         # Proportional share based on log-transformed marginal contribution
                         arm_rewards[arm_name] = query_reward * (log_marginal / total_log)
                     else:
-                        # opencode: P3 - Zero-marginal arms get a small baseline-based reward
+                        # opencode: P2 - Zero-marginal arms get a small baseline-based reward
                         # Instead of 0, give them a tiny fraction to keep them in contention
                         arm_rewards[arm_name] = query_reward * 0.01 / max(len(chosen_arms), 1)
             else:
