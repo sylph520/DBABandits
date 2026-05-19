@@ -289,9 +289,51 @@ class HypoPGAdapter(PostgreSQLAdapter):
             logging.error(f"Failed to estimate index benefit: {e}")
             return 0.0
     
-    def get_current_pds_size(self) -> float:
+    def estimate_index_size(self,
+                           table_name: str,
+                           column_names: Tuple[str, ...],
+                           include_columns: Tuple[str, ...] = ()) -> float:
         """
-        Get size of real indexes only (hypothetical indexes don't consume space).
+        Estimate index size using actual HypoPG measurement.
+
+        Creates a hypothetical index, measures its size via hypopg_relation_size(),
+        then drops it. This is more accurate than the heuristic estimation in
+        PostgreSQLAdapter.
+
+        opencode: Uses HypoPG for accurate size estimation during arm generation.
         """
-        # Hypothetical indexes don't consume space, so just get real indexes
-        return super().get_current_pds_size()
+        if not self.hypopg_enabled:
+            return super().estimate_index_size(table_name, column_names, include_columns)
+
+        try:
+            cursor = self._connection.cursor()
+
+            table_name_lower = table_name.lower()
+            column_names_lower = tuple(col.lower() for col in column_names)
+            include_columns_lower = tuple(col.lower() for col in include_columns) if include_columns else ()
+
+            # Build index definition
+            if include_columns_lower:
+                index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)}) INCLUDE ({', '.join(include_columns_lower)})"
+            else:
+                index_def = f"CREATE INDEX ON {self.schema_name}.{table_name_lower} ({', '.join(column_names_lower)})"
+
+            # Create hypothetical index
+            cursor.execute("SELECT (hypopg_create_index(%s)).indexrelid", (index_def,))
+            result = cursor.fetchone()
+            index_id = result[0]
+
+            # Measure actual size
+            cursor.execute("SELECT hypopg_relation_size(%s)", (index_id,))
+            size_result = cursor.fetchone()
+            size_bytes = size_result[0] if size_result and size_result[0] else 0
+            size_mb = size_bytes / (1024.0 * 1024.0)
+
+            # Drop the hypothetical index
+            cursor.execute("SELECT hypopg_drop_index(%s)", (index_id,))
+
+            return size_mb
+
+        except Exception as e:
+            logging.warning(f"HypoPG size estimation failed for {table_name}({column_names}), falling back to heuristic: {e}")
+            return super().estimate_index_size(table_name, column_names, include_columns)
