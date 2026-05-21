@@ -376,6 +376,13 @@ class Simulator(BaseSimulator):
 
             print(f"current total {t}: ", total_time)
 
+        # opencode: Run local search (drop-only) at end if enabled
+        if getattr(configs, 'local_search', False) and chosen_arms_last_round:
+            optimized_arms = self.run_local_search_drop(chosen_arms_last_round, query_obj_list_current)
+            if len(optimized_arms) < len(chosen_arms_last_round):
+                logging.info(f"Local search reduced config from {len(chosen_arms_last_round)} to {len(optimized_arms)} arms")
+                chosen_arms_last_round = optimized_arms
+
         logging.info("Time taken by bandit for " + str(configs.rounds) + " rounds: " + str(total_time))
         logging.info("\n\nIndex Usage Counts:\n" + pp.pformat(
             sorted(arm_selection_count.items(), key=operator.itemgetter(1), reverse=True)))
@@ -446,6 +453,27 @@ class Simulator(BaseSimulator):
             execute_cost = 0
             arm_rewards = {}
 
+            # opencode: Two-pass approach for median-cap normalization
+            reward_norm_mode = getattr(configs, 'reward_norm_mode', 'absolute')
+            reward_cap = None
+
+            if reward_norm_mode == 'median-cap' and self.use_optimizer_costs:
+                query_raw_rewards = []
+                for query in queries:
+                    plan_info = self.db.get_query_plan(query.query_string, use_analyze=False)
+                    total_cost_q = plan_info.est_statement_sub_tree_cost
+                    baseline_list = getattr(query, 'root_plan_cost_baseline', [])
+                    baseline_root = max(baseline_list) if baseline_list else total_cost_q
+                    raw_reward = baseline_root - total_cost_q
+                    query_raw_rewards.append(raw_reward)
+
+                positive_rewards = [r for r in query_raw_rewards if r > 0]
+                if positive_rewards:
+                    median_reward = numpy.median(positive_rewards)
+                    cap_multiplier = getattr(configs, 'reward_cap_multiplier', 2.0)
+                    reward_cap = median_reward * cap_multiplier
+                    logging.info(f"Median reward cap: {reward_cap:.2f} (median: {median_reward:.2f}, multiplier: {cap_multiplier}x)")
+
             for query in queries:
                 # opencode: Use ANALYZE only if NOT using optimizer costs
                 # use_optimizer_costs=True -> use EXPLAIN only (fast, estimates)
@@ -477,7 +505,7 @@ class Simulator(BaseSimulator):
                 # opencode: Calculate rewards with marginal contribution
                 query_arm_rewards, used_any = self._calculate_arm_rewards_marginal(
                     query, index_usage, chosen_arms, baseline_attr, total_cost,
-                    is_hyp_phase, clustered_scans)
+                    is_hyp_phase, clustered_scans, reward_cap=reward_cap)
 
                 # Merge query rewards into cumulative rewards
                 for idx_name, reward in query_arm_rewards.items():
@@ -507,7 +535,7 @@ class Simulator(BaseSimulator):
                 )
 
     # opencode: NEW METHOD - Marginal contribution reward calculation
-    def _calculate_arm_rewards_marginal(self, query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase, clustered_scans=None):
+    def _calculate_arm_rewards_marginal(self, query, index_usage, chosen_arms, baseline_attr, total_cost, is_hyp_phase, clustered_scans=None, reward_cap=None):
         """
         opencode: Calculate arm rewards using marginal contribution.
 
@@ -526,6 +554,7 @@ class Simulator(BaseSimulator):
             total_cost: Root plan Total Cost with all arms present
             is_hyp_phase: If True (during hyp_rounds), use simple reward (no marginal calc)
             clustered_scans: Dict of {table_name: clustered_scan_cost}
+            reward_cap: Optional cap for query_reward (used by median-cap normalization)
 
         Returns:
             Tuple of (arm_rewards dict, used_any bool)
@@ -548,10 +577,16 @@ class Simulator(BaseSimulator):
         if not chosen_arms:
             return arm_rewards, used_any
 
+        # opencode: Helper to apply reward cap
+        def apply_reward_cap(raw_reward):
+            if reward_cap is not None:
+                return min(raw_reward, reward_cap)
+            return raw_reward
+
         # opencode: In hyp_rounds phase or no baseline, use equal distribution (marginal needs stable baseline)
         if is_hyp_phase or not baseline_list:
             used_any = True
-            query_reward = baseline_root - total_cost
+            query_reward = apply_reward_cap(baseline_root - total_cost)
             per_arm = query_reward / len(chosen_arms)
             for idx_name in chosen_arms.keys():
                 arm_rewards[idx_name] = per_arm
@@ -610,26 +645,42 @@ class Simulator(BaseSimulator):
             total_log = sum(v for v in log_marginals.values() if v > 0)
             if total_log > 0:
                 used_any = True
-                query_reward = baseline_root - cost_with_all
+                query_reward = apply_reward_cap(baseline_root - cost_with_all)
+
+                # opencode: Compute median of positive marginals for threshold mode
+                positive_values = [m for m in marginal_rewards.values() if m > 0]
+                median_marginal = numpy.median(positive_values) if positive_values else 0.0
+                zero_marginal_mode = getattr(configs, 'zero_marginal_mode', 'zero')
+                zero_marginal_threshold = getattr(configs, 'zero_marginal_threshold', 0.1)
+
                 for arm_name, log_marginal in log_marginals.items():
                     if log_marginal > 0:
                         # Proportional share based on log-transformed marginal contribution
                         arm_rewards[arm_name] = query_reward * (log_marginal / total_log)
                     else:
-                        # opencode: P2 - Zero-marginal arms get a small baseline-based reward
-                        # Instead of 0, give them a tiny fraction to keep them in contention
-                        arm_rewards[arm_name] = query_reward * 0.01 / max(len(chosen_arms), 1)
+                        # opencode: Zero-marginal arm handling based on mode
+                        marginal = marginal_rewards.get(arm_name, 0.0)
+                        if zero_marginal_mode == 'zero':
+                            arm_rewards[arm_name] = 0.0
+                        elif zero_marginal_mode == 'threshold':
+                            if marginal > median_marginal * zero_marginal_threshold:
+                                arm_rewards[arm_name] = query_reward * (numpy.log1p(marginal) / total_log)
+                            else:
+                                arm_rewards[arm_name] = 0.0
+                        elif zero_marginal_mode == 'memory-penalty':
+                            arm = chosen_arms.get(arm_name)
+                            arm_rewards[arm_name] = -arm.memory if arm else 0.0
             else:
                 # Fallback: no positive marginals, use equal distribution
                 used_any = True
-                query_reward = baseline_root - cost_with_all
+                query_reward = apply_reward_cap(baseline_root - cost_with_all)
                 per_arm = query_reward / len(chosen_arms)
                 for idx_name in chosen_arms.keys():
                     arm_rewards[idx_name] = per_arm
         else:
             # Fallback: no positive marginals, use equal distribution
             used_any = True
-            query_reward = baseline_root - cost_with_all
+            query_reward = apply_reward_cap(baseline_root - cost_with_all)
             per_arm = query_reward / len(chosen_arms)
             for idx_name in chosen_arms.keys():
                 arm_rewards[idx_name] = per_arm
@@ -702,6 +753,63 @@ class Simulator(BaseSimulator):
             logging.info("Skipping server restart (optimizer cost mode - no state to clear)")
         else:
             sql_helper.restart_sql_server()
+
+    # opencode: NEW METHOD - Drop-only local search
+    def run_local_search_drop(self, chosen_arms, queries):
+        """
+        Try dropping arms one at a time to reduce config size without increasing cost.
+        Runs at the very end of simulation. Uses strict < acceptance criterion.
+        """
+        current_config = dict(chosen_arms)
+        current_cost = self._evaluate_config_cost(current_config, queries)
+        current_memory = sum(a.memory for a in current_config.values())
+        max_rounds = getattr(configs, 'local_search_rounds', 3)
+        logging.info(f"Local search start: {len(current_config)} arms, cost={current_cost:.2f}, memory={current_memory:.2f}MB")
+
+        for round_i in range(max_rounds):
+            improved = False
+            for drop_name, drop_arm in list(current_config.items()):
+                trial_config = dict(current_config)
+                del trial_config[drop_name]
+
+                trial_cost = self._evaluate_config_cost(trial_config, queries)
+                if trial_cost < current_cost:  # Strict improvement only
+                    current_config = trial_config
+                    current_cost = trial_cost
+                    new_memory = sum(a.memory for a in current_config.values())
+                    logging.info(f"Local search round {round_i}: dropped {drop_name}, cost={current_cost:.2f}, memory={new_memory:.2f}MB")
+                    improved = True
+                    break
+
+            if not improved:
+                logging.info(f"Local search converged after {round_i + 1} rounds, final config: {len(current_config)} arms")
+                break
+
+        return current_config
+
+    def _evaluate_config_cost(self, config, queries):
+        """
+        Evaluate total cost of a config by creating all arms, running EXPLAIN on all queries, then dropping.
+        """
+        if not self.uses_adapter:
+            return 0.0
+
+        total_cost = 0.0
+        try:
+            # Create all arms in config
+            for arm_name, arm in config.items():
+                self.db.create_index(arm.table_name, arm.index_cols, arm_name, arm.include_cols)
+
+            # Evaluate all queries
+            for query in queries:
+                plan_info = self.db.get_query_plan(query.query_string, use_analyze=False)
+                total_cost += plan_info.est_statement_sub_tree_cost
+        finally:
+            # Drop all arms
+            for arm_name, arm in config.items():
+                self.db.drop_index(arm.table_name, arm_name)
+
+        return total_cost
 
     # opencode: NEW METHOD - Create query for PostgreSQL
     def create_query_postgres(self, query_id, query_string, predicates, payloads, time_stamp):
@@ -978,6 +1086,46 @@ Examples:
     )
 
     parser.add_argument(
+        '--zero-marginal-mode',
+        type=str,
+        default='zero',
+        choices=['zero', 'threshold', 'memory-penalty'],
+        help='How to handle arms with zero marginal contribution: zero (0.0, default), threshold (below N%% of median), memory-penalty (negative memory cost)'
+    )
+    parser.add_argument(
+        '--zero-marginal-threshold',
+        type=float,
+        default=0.1,
+        help='Threshold multiplier for zero-marginal-mode=threshold. Arms with marginal < threshold * median get 0 reward (default: 0.1 = 10%% of median)'
+    )
+    parser.add_argument(
+        '--local-search',
+        action='store_true',
+        default=False,
+        help='Run drop-only local search at end of simulation to remove unnecessary arms'
+    )
+    parser.add_argument(
+        '--local-search-rounds',
+        type=int,
+        default=3,
+        help='Max rounds of drop attempts for local search (default: 3)'
+    )
+
+    parser.add_argument(
+        '--reward-norm-mode',
+        type=str,
+        default='absolute',
+        choices=['absolute', 'median-cap'],
+        help='Reward normalization: absolute (raw cost diff), median-cap (cap each query at N×median)'
+    )
+    parser.add_argument(
+        '--reward-cap-multiplier',
+        type=float,
+        default=2.0,
+        help='Multiplier for median reward cap when --reward-norm-mode=median-cap (default: 2.0)'
+    )
+
+    parser.add_argument(
         '--no-file-log',
         action='store_true',
         dest='no_file_log',
@@ -1043,6 +1191,25 @@ if __name__ == "__main__":
     if args.max_memory is not None:
         configs.max_memory = args.max_memory
         print(f"Using max_memory from CLI: {args.max_memory}")
+
+    if args.reward_norm_mode != 'absolute':
+        configs.reward_norm_mode = args.reward_norm_mode
+        print(f"Reward normalization mode: {configs.reward_norm_mode}")
+        if args.reward_norm_mode == 'median-cap':
+            configs.reward_cap_multiplier = args.reward_cap_multiplier
+            print(f"  Reward cap multiplier: {configs.reward_cap_multiplier}x")
+
+    configs.zero_marginal_mode = args.zero_marginal_mode
+    if args.zero_marginal_mode != 'zero':
+        print(f"Zero marginal mode: {configs.zero_marginal_mode}")
+    configs.zero_marginal_threshold = args.zero_marginal_threshold
+    if args.zero_marginal_mode == 'threshold':
+        print(f"Zero marginal threshold: {configs.zero_marginal_threshold}x median")
+
+    if args.local_search:
+        configs.local_search = True
+        configs.local_search_rounds = args.local_search_rounds
+        print(f"Local search enabled (drop-only, {configs.local_search_rounds} rounds)")
 
     # Apply --no-cluster-filter flag
     if args.no_cluster_filter:
